@@ -3,13 +3,20 @@
   "version": "0.1.0",
   "description": "MCP server producing C-header-style signature views of TypeScript source, with line offsets, for AI coding agents",
   "type": "module",
-  "bin": { "ts-header-mcp": "dist/server.js" },
+  "bin": {
+    "ts-header-mcp": "dist/server.js"
+  },
   "main": "dist/server.js",
-  "files": ["dist"],
-  "engines": { "node": ">=20" },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsx --test \"test/unit/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm typecheck && tsx --test \"test/unit/*.test.ts\"",
     "smoke-test": "tsx test/smoke.ts",
     "start": "node dist/server.js"
   },
