@@ -1,0 +1,51 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+web_stage/
+
+# Build outputs
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Operating System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor/IDE configurations
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Cache and environment files
+.eslintcache
+.npm
+.node_repl_history
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.probe-*
