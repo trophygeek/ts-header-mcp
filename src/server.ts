@@ -52,6 +52,13 @@ server.registerTool(
         .positive()
         .optional()
         .describe("Approximate output budget. Default 4000. Raise it if output was truncated."),
+      filter: z
+        .string()
+        .optional()
+        .describe(
+          "Show only symbols whose NAME matches this pattern (regex, case-insensitive; plain text works too). " +
+            "Applies at every level — use ts_header(\".\", {filter: \"booking\"}) to find booking-related symbols across the project."
+        ),
     },
   },
   async (args) => {
@@ -61,6 +68,7 @@ server.registerTool(
         depth: args.depth,
         docs: args.docs,
         max_tokens: args.max_tokens,
+        filter: args.filter,
       });
       return { content: [{ type: "text", text }] };
     } catch (err) {

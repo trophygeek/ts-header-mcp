@@ -1,4 +1,7 @@
-// Fixture: exercises the extractor edge cases from design doc M1.
+/**
+ * Fixture module for ts-header extraction tests. Exercises modern TS edge cases.
+ */
+
 type Brand<T, B extends string> = T & { readonly __brand: B };
 
 interface Database {
@@ -118,3 +121,33 @@ export function processOrder(o: Ordr): number {
 }
 
 export const MAX_PAGE_SIZE = 100;
+
+// -- framework-style const (regression, design review 2026-07): a large
+// `export const x = framework({...})` must NOT be dense-grouped and must
+// keep its own L-range annotation, with its rendered type length capped.
+type Registered<A, R> = { args: A; run: (a: A) => R };
+function endpoint<A, R>(def: { args: A; handler: (args: A) => Promise<R> }): Registered<A, Promise<R>> {
+  return { args: def.args, run: (a) => def.handler(a) };
+}
+export const createBooking = endpoint({
+  args: {
+    profileId: "" as UserId,
+    spotId: "",
+    idempotencyKey: "",
+    veryLongFieldNameToInflateTheRenderedTypeStringPastTheCapForTesting: 0,
+  },
+  handler: async (args) => {
+    const held = [args.spotId];
+    if (held.length === 0) throw new Error("NO_SPOT");
+    return { bookingId: args.idempotencyKey, spot: args.spotId, who: args.profileId };
+  },
+});
+
+// -- multi-line heritage clause (regression: must collapse to one line) --
+class Base<P, S> { p!: P; s!: S }
+export class Panel extends Base<
+  { children: string; fallback?: string },
+  { hasError: boolean }
+> {
+  render(): string { return ""; }
+}

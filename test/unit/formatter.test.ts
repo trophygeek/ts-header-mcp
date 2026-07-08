@@ -49,6 +49,13 @@ describe("annotations", () => {
     assert.match(out, /\/\/ L7-12/);
   });
 
+  it("includes the error's own line when it differs from the declaration line", () => {
+    const out = formatFileHeader(
+      model([entry({ name: "App", text: "export function App(): JSX.Element", line: 100, endLine: 300, error: { line: 177, code: 2339, message: "Property 'env' does not exist" } })])
+    );
+    assert.match(out, /\/\/ L100-300 ⚠ at L177 TS2339/);
+  });
+
   it("appends the TS error code and message", () => {
     const out = formatFileHeader(
       model([entry({ name: "f", text: "export function f(o: Ordr): number", line: 3, endLine: 5, error: { line: 3, code: 2304, message: "Cannot find name 'Ordr'." } })])
@@ -135,6 +142,42 @@ describe("containers and children", () => {
   });
 });
 
+describe("file-level doc", () => {
+  it("renders the file doc directly under the banner", () => {
+    const out = formatFileHeader(model([], { fileDoc: "Spot reallocation optimizer." }));
+    const lines = out.split("\n");
+    assert.match(lines[0], /^\/\/ ==== /);
+    assert.equal(lines[1], "// Spot reallocation optimizer.");
+  });
+
+  it("brief docs render BEFORE multi-line declarations", () => {
+    const e = entry({
+      kind: "interface",
+      name: "Realloc",
+      text: "export interface Realloc {\n  bookingId: string;\n}",
+      line: 5,
+      endLine: 8,
+      dense: false,
+      doc: { brief: "Optimizes layout.", deprecated: false },
+    });
+    const out = formatFileHeader(model([e]), { docs: "brief" });
+    assert.ok(
+      out.indexOf("// Optimizes layout.") < out.indexOf("export interface Realloc"),
+      `doc should precede the declaration:\n${out}`
+    );
+  });
+
+  it("brief docs still render after single-line declarations", () => {
+    const e = entry({
+      name: "f",
+      text: "export function f(): void",
+      doc: { brief: "Does f.", deprecated: false },
+    });
+    const out = formatFileHeader(model([e]), { docs: "brief" });
+    assert.ok(out.indexOf("export function f(): void") < out.indexOf("// Does f."));
+  });
+});
+
 describe("overload chains", () => {
   it("renders consecutive same-name functions without blank lines between", () => {
     const overloads = [
@@ -153,6 +196,16 @@ describe("special files and budgets", () => {
   it("renders barrel files as a re-export summary", () => {
     const out = formatFileHeader(model([], { barrel: true, reexports: ["./a.js", "./b.js"] }));
     assert.match(out, /barrel file: re-exports \.\/a\.js, \.\/b\.js/);
+  });
+
+  it("caps long barrel re-export lists at 8", () => {
+    const many = Array.from({ length: 18 }, (_, i) => `./m${i}.js`);
+    const header = formatFileHeader(model([], { barrel: true, reexports: many }));
+    assert.match(header, /\.\/m7\.js, \+10 more/);
+    const toc = formatFileToc("src", [
+      { fileName: "index.ts", totalLines: 20, exportNames: [], barrel: true, reexports: many, isTest: false },
+    ]);
+    assert.match(toc, /\+10 more/);
   });
 
   it("adds an error banner above the threshold", () => {
@@ -192,10 +245,32 @@ describe("directory TOCs", () => {
     assert.match(out, /a\.test\.ts \[test\]/);
   });
 
-  it("caps export name lists with a +n more suffix", () => {
-    const names = Array.from({ length: 12 }, (_, i) => `export${i}`);
+  it("caps export name lists with a +n more suffix (file rows cap at 24)", () => {
+    const names = Array.from({ length: 30 }, (_, i) => `export${i}`);
     const out = formatFileToc("src", [file({ fileName: "big.ts", exportNames: names })]);
-    assert.match(out, /\+4 more/);
+    assert.match(out, /\+6 more/);
+  });
+
+  it("dedupes names and drops single-character junk", () => {
+    const out = formatFileToc("src", [
+      file({ fileName: "x.ts", exportNames: ["App", "App", "a", "ErrorBoundary", "App"] }),
+    ]);
+    assert.match(out, /App, ErrorBoundary/);
+    assert.equal((out.match(/App/g) ?? []).length, 1);
+    assert.ok(!/\ba,/.test(out) && !/, a\b/.test(out));
+  });
+
+  it("project TOC file rows carry line counts and test tags", () => {
+    const out = formatProjectToc(
+      "src",
+      [{ dirName: "services", fileCount: 1, totalLines: 100, topExports: ["A"] }],
+      [
+        file({ fileName: "root.ts", totalLines: 42 }),
+        file({ fileName: "root.test.ts", totalLines: 7, isTest: true }),
+      ]
+    );
+    assert.match(out, /root\.ts\s+42L/);
+    assert.match(out, /root\.test\.ts \[test\]\s+7L/);
   });
 
   it("project TOC totals files and lines across directories", () => {

@@ -43,15 +43,13 @@ One tool, `ts_header(path, depth?, docs?, max_tokens?)`. Navigation depth is exp
 
 - `path` — file or directory, relative to the workspace. A directory of directories returns a project overview; a directory of files returns a per-file export list (with barrel-file detection and `[test]` tagging); a file returns the full header. `"."` gives the project overview.
 - `depth` — `exports` (default) | `all` (adds non-exported declarations and private members) | `deep` (also descends into function bodies: inner functions, closures, locally declared classes).
-- `docs` — `none` | `brief` (default: first JSDoc sentence, shown after the signature) | `full` (complete JSDoc including `@param` and `@throws`). `@deprecated` is always shown regardless of mode.
+- `docs` — `none` | `brief` (default: first JSDoc sentence; shown after single-line signatures, before multi-line declarations) | `full` (complete JSDoc including `@param` and `@throws`). `@deprecated` is always shown regardless of mode. A JSDoc block at the very top of a file is treated as the file's description rather than the first declaration's: it renders under the header banner and as a short annotation on the file's row in directory listings.
 - `max_tokens` — approximate output budget, default 4000. Truncated output says so and how to request more.
+- `filter` — show only symbols whose name matches a pattern (case-insensitive regex; plain text works too). Applies at every level, so `ts_header(".", {filter: "booking"})` acts as a lightweight typed symbol search across the project. Filters names only; full-text search inside function bodies remains grep's job.
 
 ## Install
 
 Requires Node 20+.
-
-> [!NOTE]
-> Script steps assume destination is `~/tools`. Edit for your setup.
 
 ```bash
 git clone https://github.com/<your-username>/ts-header-mcp.git ~/tools/ts-header
@@ -63,6 +61,8 @@ npm run build                # -> dist/server.js
 ```
 
 Cloning outside your working repositories (e.g. `~/tools`) keeps the server out of your projects' version control.
+
+Note for TypeScript 6.0+: the compiler no longer auto-includes packages from `node_modules/@types`, so the project tsconfig sets `"types": ["node"]` explicitly. If you see `TS2591: Cannot find name 'process'` during `npm run build`, that line is missing.
 
 ## Client setup
 
@@ -179,8 +179,11 @@ By default the server performs no disk writes; all caching is in-memory, and it 
 
 A persistent cache is available as an opt-in via `TS_HEADER_CACHE=1`. Its location resolves in order: `TS_HEADER_CACHE_DIR`, then `$XDG_CACHE_HOME/ts-header`, then `os.tmpdir()/ts-header`. Each candidate is probe-written at startup; if none is writable the server logs one line and continues memory-only. If you deliberately point the cache inside a workspace, a `.gitignore` containing `*` is written into the cache directory.
 
+Directory listings respect the workspace-root `.gitignore` (a common subset: `*`, `?`, `**`, negation, directory patterns) on top of a built-in skip list (`node_modules`, `dist`, `.git`, ...). Nested `.gitignore` files are not read. Directly addressing an ignored file still works; the filter applies to listings only.
+
 Other environment variables:
 
+- `TS_HEADER_GITIGNORE=0` — disable .gitignore handling in listings
 - `TS_HEADER_DOCS=none|brief|full` — server-wide default for the `docs` option, useful for testing whether doc summaries earn their tokens for your agents
 - `TS_HEADER_DENSE_MIN` — grouping threshold for dense declaration blocks, default 6 source lines
 - `TS_HEADER_MAX_PROJECTS` — LanguageService LRU size for monorepos, default 4
@@ -191,9 +194,26 @@ Other environment variables:
 
 The extractor sits behind the `FileHeaderModel` contract, so it can be replaced (for example by a tree-sitter implementation) without changes to the formatter, cache, or MCP layers. `ts-header-design.md` contains the design rationale and the decision log.
 
+## Backlog and next steps
+
+Roughly in priority order. The first two come from the original design doc (see `ts-header-design.md` §12); the rest accumulated during field testing on a real monorepo.
+
+1. **Weak-model navigation eval (design doc M4).** The motivating claim — that headers reduce wrong-file reads for less capable agents — has not been measured. Plan: run a small model on navigation tasks in a mid-size repo with and without the tool, counting files read and wrong-file reads. This is the experiment that should decide the remaining format questions (e.g. whether `docs:"brief"` earns its tokens) instead of taste.
+2. **Budget-driven tree depth.** The project overview currently shows one directory level. Better: expand subdirectories while the token budget allows, collapsing the largest subtrees first, so depth falls out of `max_tokens` rather than a fixed constant.
+3. **Solution-builder project references.** Monorepo references are handled by folding referenced projects' source files into one program — correct, but programs get large in big workspaces. Using the compiler's solution-builder machinery would keep per-package programs separate.
+4. **File-watcher invalidation.** Freshness is currently per-request mtime checking (correct, but more `stat` calls than necessary on large projects). An `fs.watch`-based invalidator would make repeated directory listings cheaper.
+5. **Multi-workspace serving.** The server serves the single workspace given at startup; one config entry per project is the workaround. Resolving the workspace per-call (from the request path or client `cwd`) would let one registration serve everything.
+6. **`docs:"auto"`.** Include the brief doc sentence only when it adds information beyond the symbol name (skip "Fetches a user" on `fetchUser`). Needs a heuristic that fails gracefully; blocked on the eval above to know whether it matters.
+7. **Machine-readable output.** An optional JSON variant of `FileHeaderModel` for orchestrators that want to post-process rather than read. The model is already plain JSON internally; this is mostly a `format` parameter.
+8. **Nested `.gitignore` files.** Only the workspace-root `.gitignore` is read today; per-directory ignore files are a straightforward extension of `src/ignore.ts`.
+9. **Vue/Svelte SFC script blocks.** Extract from `<script lang="ts">` sections. Low priority unless a target codebase needs it.
+10. **Overload polish.** Overload chains render tightly, but the implementation signature (not callable in TS) still appears alongside the declaration overloads; `.d.ts` convention would hide it while keeping its L-range on the chain.
+
+Deliberately out of scope: editing/refactoring (read-only tool), full-text search inside function bodies (grep does this better), and importance ranking (headers are complete by design; ranked summaries are Aider-repo-map territory).
+
 ## Status and tests
 
-- `npm test` runs the unit suite (`test/unit/`, Node's built-in test runner via tsx, 40 tests): formatter tests are pure-function tests over hand-built models (annotations, docs modes, dense-block grouping, error banners, truncation, TOC layout); extractor tests build one program over the shared fixture and assert on the model structure (depth semantics, inferred return types, overloads, JSDoc extraction, diagnostic attachment, barrel detection); router tests build a throwaway workspace in the OS temp dir and cover all three navigation levels, guard rails, and the zero-writes invariant (including with an `incremental: true` tsconfig).
+- `npm test` runs the unit suite (`test/unit/`, Node's built-in test runner via tsx, 66 tests): formatter tests are pure-function tests over hand-built models (annotations, docs modes, dense-block grouping, error banners, truncation, TOC layout); extractor tests build one program over the shared fixture and assert on the model structure (depth semantics, inferred return types, overloads, JSDoc extraction, diagnostic attachment, barrel detection); router tests build a throwaway workspace in the OS temp dir and cover all three navigation levels, the `filter` parameter, `.gitignore` handling, guard rails, and the zero-writes invariant (including with an `incremental: true` tsconfig). A Convex-shaped fixture guards the framework-code regressions found in field testing: large `export const x = framework({...})` declarations keep their own line annotations, and rendered types are length-capped with `import("...")` qualifiers stripped.
 - `npm run smoke-test` is intentionally verbose: it prints complete rendered headers for the fixture at two depth/docs combinations, for human review of the output format, followed by a summary set of assertions.
 - `server.ts` targets `@modelcontextprotocol/sdk` ^1.x. It was written in an environment without registry access, so the SDK wiring is the one part not exercised by the test suite; everything beneath it is executed and type-checked under `--strict`.
 

@@ -5,19 +5,19 @@
  */
 
 export type DeclKind =
-  | "function"
-  | "class"
-  | "interface"
-  | "type"
-  | "enum"
-  | "const"
-  | "let"
-  | "namespace"
-  | "method"
-  | "property"
-  | "accessor"
-  | "constructor"
-  | "reexport";
+    | "function"
+    | "class"
+    | "interface"
+    | "type"
+    | "enum"
+    | "const"
+    | "let"
+    | "namespace"
+    | "method"
+    | "property"
+    | "accessor"
+    | "constructor"
+    | "reexport";
 
 export interface DocInfo {
   /** First sentence of the JSDoc, cleaned, <= 100 chars. */
@@ -55,6 +55,8 @@ export interface DeclEntry {
 export interface FileHeaderModel {
   /** Workspace-relative path. */
   path: string;
+  /** First sentence of a file-leading JSDoc block, when one is detected. */
+  fileDoc?: string;
   totalLines: number;
   exportCount: number;
   /** True when the file is >= 80% re-exports (design doc §5.6). */

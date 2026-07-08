@@ -25,6 +25,8 @@ export interface ServerConfig {
   docsDefault: DocsMode;
   denseGroupMinLines: number;
   maxLanguageServices: number;
+  /** Respect the workspace-root .gitignore in directory listings (default on; TS_HEADER_GITIGNORE=0 disables). */
+  useGitignore: boolean;
 }
 
 export function loadConfig(workspaceRoot: string): ServerConfig {
@@ -34,6 +36,7 @@ export function loadConfig(workspaceRoot: string): ServerConfig {
     docsDefault: parseDocs(process.env.TS_HEADER_DOCS) ?? "brief",
     denseGroupMinLines: intEnv("TS_HEADER_DENSE_MIN", 6),
     maxLanguageServices: intEnv("TS_HEADER_MAX_PROJECTS", 4),
+    useGitignore: process.env.TS_HEADER_GITIGNORE !== "0",
   };
 }
 

@@ -20,6 +20,26 @@ import type {
 
 const MAX_ERR_MSG = 90;
 const BRIEF_MAX = 100;
+/** Max rendered length for a variable/property type before eliding with … */
+const MAX_TYPE_LEN = 160;
+/** Max rendered length for a full signature line before eliding with … */
+const MAX_SIG_LEN = 200;
+/** A body-less const is "dense" (groupable, no own annotation) only when small. */
+const DENSE_MAX_CONST_LINES = 5;
+/** Types/interfaces/enums stay groupable up to a larger span. */
+const DENSE_MAX_TYPE_LINES = 12;
+
+/**
+ * De-noise a checker-rendered type: strip `import("...").` qualifiers
+ * (framework types like Convex render every reference fully qualified),
+ * then hard-cap the length. A truncated type with a line number beats a
+ * complete 150-token type that buries the header (design review 2026-07).
+ */
+function cleanType(t: string, max = MAX_TYPE_LEN): string {
+  let s = t.replace(/import\("[^"]*"\)\./g, "");
+  if (s.length > max) s = s.slice(0, max - 1) + "…";
+  return s;
+}
 
 export interface ExtractInput {
   sourceFile: ts.SourceFile;
@@ -34,6 +54,7 @@ export interface ExtractInput {
 export function extract(input: ExtractInput): FileHeaderModel {
   const { sourceFile, checker, diagnostics, relPath, depth } = input;
   const errors = mapDiagnostics(sourceFile, diagnostics);
+  const fileDoc = detectFileDoc(sourceFile);
 
   const entries: DeclEntry[] = [];
   const reexports: string[] = [];
@@ -54,6 +75,14 @@ export function extract(input: ExtractInput): FileHeaderModel {
       continue;
     }
     const extracted = extractStatement(stmt, checker, sourceFile, depth, errors);
+    // A promoted file-level doc must not ALSO appear as the first
+    // declaration's doc (the compiler attaches file headers to whatever
+    // declaration comes first — a misattribution the source can't help).
+    if (stmt === fileDoc.suppressOn) {
+      for (const e of extracted) {
+        e.doc = e.doc?.deprecated ? { deprecated: true } : undefined;
+      }
+    }
     for (const e of extracted) {
       if (depth === "exports" && !e.exported) continue;
       entries.push(e);
@@ -62,10 +91,11 @@ export function extract(input: ExtractInput): FileHeaderModel {
 
   const exportCount = countExports(entries) + reexportCount;
   const barrel =
-    statementCount > 0 && reexportCount / statementCount >= 0.8 && reexportCount >= 2;
+      statementCount > 0 && reexportCount / statementCount >= 0.8 && reexportCount >= 2;
 
   return {
     path: relPath,
+    fileDoc: fileDoc.brief,
     totalLines: sourceFile.getLineAndCharacterOfPosition(sourceFile.end).line + 1,
     exportCount,
     barrel,
@@ -74,6 +104,46 @@ export function extract(input: ExtractInput): FileHeaderModel {
     fileErrors: errors.unattached,
     skippedRanges: [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// File-level JSDoc detection
+// ---------------------------------------------------------------------------
+
+/**
+ * A JSDoc block at the very top of a file is usually a FILE header, but the
+ * compiler attaches it to the first statement. Promote it to a file-level
+ * description when:
+ *  - the first statement carries 2+ JSDoc blocks (first is the file's,
+ *    last is the declaration's own — docInfo already uses the last), or
+ *  - the first statement is an import (imports don't take doc comments), or
+ *  - there is a blank-line gap between the doc and the declaration
+ *    (in which case the declaration's doc is suppressed — see extract()).
+ * A doc butted directly against the first declaration stays that
+ * declaration's doc.
+ */
+function detectFileDoc(sf: ts.SourceFile): { brief?: string; suppressOn?: ts.Statement } {
+  const first = sf.statements[0];
+  if (!first) return {};
+  const jsDocs = (first as { jsDoc?: ts.JSDoc[] }).jsDoc;
+  if (!jsDocs?.length) return {};
+  const doc = jsDocs[0];
+  const docStartLine = sf.getLineAndCharacterOfPosition(doc.getStart(sf)).line + 1;
+  if (docStartLine > 3) return {};
+  const comment =
+      typeof doc.comment === "string"
+      ? doc.comment
+      : doc.comment?.map((c) => c.text ?? "").join("") ?? "";
+  const brief = firstSentence(comment);
+  if (!brief) return {};
+
+  if (jsDocs.length > 1) return { brief };
+  if (ts.isImportDeclaration(first) || ts.isImportEqualsDeclaration(first)) return { brief };
+
+  const docEndLine = sf.getLineAndCharacterOfPosition(doc.getEnd()).line + 1;
+  const stmtLine = sf.getLineAndCharacterOfPosition(first.getStart(sf)).line + 1;
+  if (stmtLine - docEndLine >= 2) return { brief, suppressOn: first };
+  return {};
 }
 
 // ---------------------------------------------------------------------------
@@ -88,8 +158,8 @@ interface ErrorIndex {
 }
 
 function mapDiagnostics(
-  sf: ts.SourceFile,
-  diags: readonly ts.Diagnostic[]
+    sf: ts.SourceFile,
+    diags: readonly ts.Diagnostic[]
 ): ErrorIndex {
   const byLine = new Map<number, ErrorMark>();
   for (const d of diags) {
@@ -97,8 +167,8 @@ function mapDiagnostics(
     const line = sf.getLineAndCharacterOfPosition(d.start).line + 1;
     if (byLine.has(line)) continue;
     const message = ts
-      .flattenDiagnosticMessageText(d.messageText, " ")
-      .slice(0, MAX_ERR_MSG);
+        .flattenDiagnosticMessageText(d.messageText, " ")
+        .slice(0, MAX_ERR_MSG);
     byLine.set(line, { line, code: d.code, message });
   }
   const claimed = new Set<number>();
@@ -122,11 +192,11 @@ function mapDiagnostics(
 // ---------------------------------------------------------------------------
 
 function extractStatement(
-  stmt: ts.Statement,
-  checker: ts.TypeChecker,
-  sf: ts.SourceFile,
-  depth: Depth,
-  errors: ErrorIndex
+    stmt: ts.Statement,
+    checker: ts.TypeChecker,
+    sf: ts.SourceFile,
+    depth: Depth,
+    errors: ErrorIndex
 ): DeclEntry[] {
   if (ts.isFunctionDeclaration(stmt) && stmt.name) {
     return [functionEntry(stmt, stmt.name.text, checker, sf, depth, errors)];
@@ -157,13 +227,13 @@ function extractStatement(
 // ---------------------------------------------------------------------------
 
 function functionEntry(
-  fn: ts.FunctionDeclaration | ts.MethodDeclaration | ts.FunctionExpression | ts.ArrowFunction,
-  name: string,
-  checker: ts.TypeChecker,
-  sf: ts.SourceFile,
-  depth: Depth,
-  errors: ErrorIndex,
-  opts: { keyword?: string; exported?: boolean; isDefault?: boolean; arrowStyle?: boolean } = {}
+    fn: ts.FunctionDeclaration | ts.MethodDeclaration | ts.FunctionExpression | ts.ArrowFunction,
+    name: string,
+    checker: ts.TypeChecker,
+    sf: ts.SourceFile,
+    depth: Depth,
+    errors: ErrorIndex,
+    opts: { keyword?: string; exported?: boolean; isDefault?: boolean; arrowStyle?: boolean } = {}
 ): DeclEntry {
   const exported = opts.exported ?? isExported(fn as ts.Declaration);
   const { line, endLine } = lines(sf, (fn as ts.FunctionDeclaration).name ?? fn, fn);
@@ -171,8 +241,8 @@ function functionEntry(
   const keyword = opts.keyword ?? "function ";
   const prefix = exported ? (opts.isDefault ? "export default " : "export ") : "";
   const text = opts.arrowStyle
-    ? `${prefix}${keyword}${name}: ${sigText}`
-    : `${prefix}${keyword}${name}${sigText}`;
+               ? `${prefix}${keyword}${name}: ${sigText}`
+               : `${prefix}${keyword}${name}${sigText}`;
 
   const entry: DeclEntry = {
     kind: "function",
@@ -196,28 +266,26 @@ function functionEntry(
 
 /** Render "(params): ReturnType" — or "(params) => ReturnType" for arrow style — using checked types. */
 function signatureText(
-  node: ts.SignatureDeclaration,
-  checker: ts.TypeChecker,
-  arrowStyle = false
+    node: ts.SignatureDeclaration,
+    checker: ts.TypeChecker,
+    arrowStyle = false
 ): string {
   const sig = checker.getSignatureFromDeclaration(node);
   if (!sig) return "(…)";
-  let flags =
-    ts.TypeFormatFlags.UseAliasDefinedOutsideCurrentScope |
-    ts.TypeFormatFlags.NoTruncation;
+  let flags = ts.TypeFormatFlags.UseAliasDefinedOutsideCurrentScope;
   if (arrowStyle) flags |= ts.TypeFormatFlags.WriteArrowStyleSignature;
   let text = checker.signatureToString(sig, node, flags, ts.SignatureKind.Call);
   // signatureToString gives "(a: T): R" — exactly what we want.
   // De-noise: optional params render as "x?: T | undefined"; the "?" already says it.
   text = text.replace(/\?\:\s*([^,)]*?)\s*\|\s*undefined(?=[,)])/g, "?: $1");
-  return text;
+  return cleanType(text, MAX_SIG_LEN);
 }
 
 function innerFunctions(
-  body: ts.Node,
-  checker: ts.TypeChecker,
-  sf: ts.SourceFile,
-  errors: ErrorIndex
+    body: ts.Node,
+    checker: ts.TypeChecker,
+    sf: ts.SourceFile,
+    errors: ErrorIndex
 ): DeclEntry[] {
   const out: DeclEntry[] = [];
   const visit = (node: ts.Node) => {
@@ -226,17 +294,17 @@ function innerFunctions(
       return; // its own children handled recursively inside functionEntry
     }
     if (
-      ts.isVariableDeclaration(node) &&
-      node.initializer &&
-      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer)) &&
-      ts.isIdentifier(node.name)
+        ts.isVariableDeclaration(node) &&
+        node.initializer &&
+        (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer)) &&
+        ts.isIdentifier(node.name)
     ) {
       out.push(
-        functionEntry(node.initializer, node.name.text, checker, sf, "deep", errors, {
-          keyword: "const ",
-          exported: false,
-          arrowStyle: true,
-        })
+          functionEntry(node.initializer, node.name.text, checker, sf, "deep", errors, {
+            keyword: "const ",
+            exported: false,
+            arrowStyle: true,
+          })
       );
       return;
     }
@@ -255,26 +323,30 @@ function innerFunctions(
 // ---------------------------------------------------------------------------
 
 function classEntry(
-  cls: ts.ClassDeclaration,
-  checker: ts.TypeChecker,
-  sf: ts.SourceFile,
-  depth: Depth,
-  errors: ErrorIndex,
-  opts: { forceLocal?: boolean } = {}
+    cls: ts.ClassDeclaration,
+    checker: ts.TypeChecker,
+    sf: ts.SourceFile,
+    depth: Depth,
+    errors: ErrorIndex,
+    opts: { forceLocal?: boolean } = {}
 ): DeclEntry {
   const name = cls.name?.text ?? "(anonymous class)";
   const exported = !opts.forceLocal && isExported(cls);
   const isDefault = hasModifier(cls, ts.SyntaxKind.DefaultKeyword);
   const { line, endLine } = lines(sf, cls.name ?? cls, cls);
 
+  // Heritage clauses collapse to one line: `extends React.Component<\n  {...},\n  {...}\n>`
+  // as-written breaks the header's valid-TypeScript look (field test 2026-07).
   const heritage = (cls.heritageClauses ?? [])
-    .map((h) => h.getText(sf))
-    .join(" ");
+      .map((h) =>
+               h.getText(sf).replace(/\s+/g, " ").replace(/< /g, "<").replace(/ >/g, ">")
+      )
+      .join(" ");
   const abstract = hasModifier(cls, ts.SyntaxKind.AbstractKeyword) ? "abstract " : "";
   const prefix = exported ? (isDefault ? "export default " : "export ") : "";
   const typeParams = cls.typeParameters
-    ? `<${cls.typeParameters.map((t) => t.getText(sf)).join(", ")}>`
-    : "";
+                     ? `<${cls.typeParameters.map((t) => t.getText(sf)).join(", ")}>`
+                     : "";
 
   const children: DeclEntry[] = [];
   for (const member of cls.members) {
@@ -300,11 +372,11 @@ function classEntry(
 }
 
 function memberEntry(
-  member: ts.ClassElement,
-  checker: ts.TypeChecker,
-  sf: ts.SourceFile,
-  depth: Depth,
-  errors: ErrorIndex
+    member: ts.ClassElement,
+    checker: ts.TypeChecker,
+    sf: ts.SourceFile,
+    depth: Depth,
+    errors: ErrorIndex
 ): DeclEntry | undefined {
   const mods = memberModifiers(member);
 
@@ -348,9 +420,11 @@ function memberEntry(
   if (ts.isPropertyDeclaration(member) && member.name) {
     const name = member.name.getText(sf);
     const { line } = lines(sf, member.name, member);
-    const type = member.type
-      ? member.type.getText(sf)
-      : checker.typeToString(checker.getTypeAtLocation(member));
+    const type = cleanType(
+        member.type
+        ? member.type.getText(sf)
+        : checker.typeToString(checker.getTypeAtLocation(member))
+    );
     return {
       kind: "property",
       name,
@@ -369,8 +443,8 @@ function memberEntry(
     const { line } = lines(sf, member.name, member);
     const isGet = ts.isGetAccessorDeclaration(member);
     const type = isGet
-      ? checker.typeToString(checker.getTypeAtLocation(member.name))
-      : member.parameters[0]?.type?.getText(sf) ?? "unknown";
+                 ? checker.typeToString(checker.getTypeAtLocation(member.name))
+                 : member.parameters[0]?.type?.getText(sf) ?? "unknown";
     return {
       kind: "accessor",
       name,
@@ -404,11 +478,11 @@ function memberModifiers(member: ts.ClassElement): string {
 // ---------------------------------------------------------------------------
 
 function namespaceEntry(
-  ns: ts.ModuleDeclaration,
-  checker: ts.TypeChecker,
-  sf: ts.SourceFile,
-  depth: Depth,
-  errors: ErrorIndex
+    ns: ts.ModuleDeclaration,
+    checker: ts.TypeChecker,
+    sf: ts.SourceFile,
+    depth: Depth,
+    errors: ErrorIndex
 ): DeclEntry {
   const name = (ns.name as ts.Identifier).text;
   const { line, endLine } = lines(sf, ns.name, ns);
@@ -440,11 +514,11 @@ function namespaceEntry(
 // ---------------------------------------------------------------------------
 
 function variableEntries(
-  stmt: ts.VariableStatement,
-  checker: ts.TypeChecker,
-  sf: ts.SourceFile,
-  depth: Depth,
-  errors: ErrorIndex
+    stmt: ts.VariableStatement,
+    checker: ts.TypeChecker,
+    sf: ts.SourceFile,
+    depth: Depth,
+    errors: ErrorIndex
 ): DeclEntry[] {
   const exported = isExported(stmt);
   const kw = stmt.declarationList.flags & ts.NodeFlags.Const ? "const" : "let";
@@ -455,8 +529,8 @@ function variableEntries(
     const name = decl.name.text;
 
     if (
-      decl.initializer &&
-      (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))
+        decl.initializer &&
+        (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))
     ) {
       const entry = functionEntry(decl.initializer, name, checker, sf, depth, errors, {
         keyword: `${kw} `,
@@ -469,24 +543,30 @@ function variableEntries(
     }
 
     const { line, endLine } = lines(sf, decl.name, decl);
-    const type = decl.type
-      ? decl.type.getText(sf)
-      : checker.typeToString(
-          checker.getTypeAtLocation(decl),
-          decl,
-          ts.TypeFormatFlags.NoTruncation
-        );
+    const type = cleanType(
+        decl.type
+        ? decl.type.getText(sf)
+        : checker.typeToString(
+            checker.getTypeAtLocation(decl),
+            decl,
+            ts.TypeFormatFlags.UseAliasDefinedOutsideCurrentScope
+        )
+    );
+    // Regression guard (Convex-style `export const x = framework({...})`):
+    // a const spanning many lines must keep its own line annotation, or the
+    // header loses its jump targets. Dense (= groupable) only when small.
+    const span = endLine - line + 1;
     out.push({
-      kind: kw as DeclKind,
-      name,
-      text: `${exported ? "export " : ""}${kw} ${name}: ${type}`,
-      line,
-      endLine: line,
-      exported,
-      dense: true,
-      doc: docInfo(stmt, sf),
-      error: errors.claim(line, endLine),
-    });
+               kind: kw as DeclKind,
+               name,
+               text: `${exported ? "export " : ""}${kw} ${name}: ${type}`,
+               line,
+               endLine,
+               exported,
+               dense: span <= DENSE_MAX_CONST_LINES,
+               doc: docInfo(stmt, sf),
+               error: errors.claim(line, endLine),
+             });
   }
   return out;
 }
@@ -496,12 +576,12 @@ function variableEntries(
 // ---------------------------------------------------------------------------
 
 function printedEntry(
-  node: ts.Statement,
-  name: string,
-  kind: DeclKind,
-  sf: ts.SourceFile,
-  errors: ErrorIndex,
-  named: ts.InterfaceDeclaration | ts.TypeAliasDeclaration | ts.EnumDeclaration
+    node: ts.Statement,
+    name: string,
+    kind: DeclKind,
+    sf: ts.SourceFile,
+    errors: ErrorIndex,
+    named: ts.InterfaceDeclaration | ts.TypeAliasDeclaration | ts.EnumDeclaration
 ): DeclEntry {
   const { line, endLine } = lines(sf, named.name, node);
   let text = node.getText(sf);
@@ -515,7 +595,7 @@ function printedEntry(
     line,
     endLine,
     exported: isExported(node),
-    dense: true,
+    dense: endLine - line + 1 <= DENSE_MAX_TYPE_LINES,
     doc: docInfo(node, sf),
     error: errors.claim(line, endLine),
   };
@@ -537,7 +617,7 @@ function docInfo(node: ts.Node, sf: ts.SourceFile): DocInfo | undefined {
     const doc = jsDocs[jsDocs.length - 1];
     full = doc.getText(sf);
     const comment =
-      typeof doc.comment === "string"
+        typeof doc.comment === "string"
         ? doc.comment
         : doc.comment?.map((c) => c.text ?? "").join("") ?? "";
     brief = firstSentence(comment);
@@ -568,9 +648,9 @@ function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
 }
 
 function lines(
-  sf: ts.SourceFile,
-  nameNode: ts.Node,
-  fullNode: ts.Node
+    sf: ts.SourceFile,
+    nameNode: ts.Node,
+    fullNode: ts.Node
 ): { line: number; endLine: number } {
   const line = sf.getLineAndCharacterOfPosition(nameNode.getStart(sf)).line + 1;
   const endLine = sf.getLineAndCharacterOfPosition(fullNode.getEnd()).line + 1;

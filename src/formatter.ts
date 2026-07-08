@@ -16,16 +16,19 @@ const CHARS_PER_TOKEN = 4;
 const FILE_ERROR_BANNER_THRESHOLD = 10;
 
 export function formatFileHeader(
-  model: FileHeaderModel,
-  partial?: Partial<HeaderOptions>
+    model: FileHeaderModel,
+    partial?: Partial<HeaderOptions>
 ): string {
   const opts: HeaderOptions = { ...DEFAULT_OPTIONS, ...partial };
   const out: string[] = [];
 
   out.push(
-    `// ==== ${model.path} — ${model.totalLines} lines, ${model.exportCount} export${model.exportCount === 1 ? "" : "s"} ====`
+      `// ==== ${model.path} — ${model.totalLines} lines, ${model.exportCount} export${model.exportCount === 1 ? "" : "s"} ====`
   );
 
+  if (model.fileDoc) {
+    out.push(`// ${model.fileDoc}`);
+  }
   const totalErrors = countErrors(model);
   if (totalErrors > FILE_ERROR_BANNER_THRESHOLD) {
     out.push(`// ⚠ ${totalErrors} type/syntax errors in this file — signatures may be unreliable`);
@@ -33,7 +36,7 @@ export function formatFileHeader(
   out.push("");
 
   if (model.barrel) {
-    out.push(`// barrel file: re-exports ${model.reexports.join(", ")}`);
+    out.push(`// barrel file: re-exports ${capList(model.reexports)}`);
     out.push(`// follow: ts_header on those paths for the real declarations`);
     return finish(out, model, opts);
   }
@@ -49,7 +52,7 @@ export function formatFileHeader(
 function finish(out: string[], model: FileHeaderModel, opts: HeaderOptions): string {
   out.push("");
   out.push(`// details: read ${model.path} at the L-numbers above` +
-    (opts.docs !== "full" ? `, or docs:"full" for @param/@throws contracts` : ""));
+           (opts.docs !== "full" ? `, or docs:"full" for @param/@throws contracts` : ""));
   return truncateToBudget(out, opts).join("\n");
 }
 
@@ -58,10 +61,10 @@ function finish(out: string[], model: FileHeaderModel, opts: HeaderOptions): str
 // ---------------------------------------------------------------------------
 
 function renderEntries(
-  entries: DeclEntry[],
-  out: string[],
-  opts: HeaderOptions,
-  indentLevel: number
+    entries: DeclEntry[],
+    out: string[],
+    opts: HeaderOptions,
+    indentLevel: number
 ): void {
   const indent = "  ".repeat(indentLevel);
   let i = 0;
@@ -89,20 +92,20 @@ function renderEntries(
     // Overload chains: consecutive function entries sharing a name render as
     // a tight block, with the usual trailing blank line only after the last.
     const isOverloadContinuation =
-      entries[i].kind === "function" &&
-      entries[i + 1]?.kind === "function" &&
-      entries[i + 1].name === entries[i].name;
+        entries[i].kind === "function" &&
+        entries[i + 1]?.kind === "function" &&
+        entries[i + 1].name === entries[i].name;
     renderEntry(entries[i], out, opts, indentLevel, isOverloadContinuation);
     i++;
   }
 }
 
 function renderEntry(
-  e: DeclEntry,
-  out: string[],
-  opts: HeaderOptions,
-  indentLevel: number,
-  suppressTrailingBlank = false
+    e: DeclEntry,
+    out: string[],
+    opts: HeaderOptions,
+    indentLevel: number,
+    suppressTrailingBlank = false
 ): void {
   const indent = "  ".repeat(indentLevel);
   renderDoc(e, out, opts, indent, "before");
@@ -130,7 +133,8 @@ function annotation(e: DeclEntry): string {
     a += ` ⚠ deprecated`;
   }
   if (e.error) {
-    a += ` ⚠ TS${e.error.code}: ${e.error.message} — type unreliable`;
+    const at = e.error.line !== e.line ? `at L${e.error.line} ` : "";
+    a += ` ⚠ ${at}TS${e.error.code}: ${e.error.message} — type unreliable`;
   }
   return a;
 }
@@ -145,11 +149,11 @@ function padAnnotate(line: string, annot: string): string {
 }
 
 function renderDoc(
-  e: DeclEntry,
-  out: string[],
-  opts: HeaderOptions,
-  indent: string,
-  position: "before" | "after"
+    e: DeclEntry,
+    out: string[],
+    opts: HeaderOptions,
+    indent: string,
+    position: "before" | "after"
 ): void {
   if (!e.doc) return;
   // @deprecated always surfaces via deprecatedMark regardless of docs mode.
@@ -158,8 +162,11 @@ function renderDoc(
     for (const l of e.doc.full.split("\n")) out.push(indent + l.trim().replace(/^/, l.trim().startsWith("*") ? " " : ""));
     return;
   }
-  if (opts.docs === "brief" && position === "after" && e.doc.brief) {
-    out.push(indent + "    // " + e.doc.brief);
+  if (opts.docs === "brief" && e.doc.brief) {
+    const briefPosition = e.text.includes("\n") ? "before" : "after";
+    if (position !== briefPosition) return;
+    if (briefPosition === "before") out.push(indent + "// " + e.doc.brief);
+    else out.push(indent + "    // " + e.doc.brief);
   }
 }
 
@@ -183,7 +190,7 @@ function truncateToBudget(lines: string[], opts: HeaderOptions): string[] {
     if (total > budget) {
       const kept = lines.slice(0, Math.max(1, i));
       kept.push(
-        `// … truncated at ~${opts.maxTokens} tokens — call again with a larger max_tokens for the rest`
+          `// … truncated at ~${opts.maxTokens} tokens — call again with a larger max_tokens for the rest`
       );
       return kept;
     }
@@ -202,6 +209,16 @@ export interface DirFileSummary {
   barrel: boolean;
   reexports: string[];
   isTest: boolean;
+  /** First sentence of a file-leading JSDoc, when present. */
+  fileDoc?: string;
+}
+
+const TOC_DOC_MAX = 72;
+
+function tocDoc(f: DirFileSummary): string {
+  if (!f.fileDoc) return "";
+  const d = f.fileDoc.length > TOC_DOC_MAX ? f.fileDoc.slice(0, TOC_DOC_MAX - 1) + "…" : f.fileDoc;
+  return `  — ${d}`;
 }
 
 export interface DirSummary {
@@ -211,7 +228,8 @@ export interface DirSummary {
   topExports: string[];
 }
 
-const NAME_CAP = 8;
+const FILE_ROW_NAME_CAP = 24; // directory (file TOC) rows: near-complete
+const DIR_ROW_NAME_CAP = 10;  // project TOC rows: orientation only
 
 export function formatFileToc(dirPath: string, files: DirFileSummary[]): string {
   const out: string[] = [];
@@ -219,11 +237,11 @@ export function formatFileToc(dirPath: string, files: DirFileSummary[]): string 
   const nameW = Math.max(...files.map((f) => f.fileName.length), 4) + 2;
   for (const f of files) {
     let desc: string;
-    if (f.barrel) desc = `barrel: ${f.reexports.join(", ")}`;
-    else desc = capNames(f.exportNames);
+    if (f.barrel) desc = `barrel: ${capList(f.reexports)}`;
+    else desc = capNames(f.exportNames, FILE_ROW_NAME_CAP);
     const tag = f.isTest ? " [test]" : "";
     out.push(
-      `${(f.fileName + tag).padEnd(nameW)} ${String(f.totalLines + "L").padStart(6)}   ${desc}`
+        `${(f.fileName + tag).padEnd(nameW)} ${String(f.totalLines + "L").padStart(6)}   ${desc}${tocDoc(f)}`
     );
   }
   const example = files.find((f) => !f.barrel && !f.isTest) ?? files[0];
@@ -235,27 +253,28 @@ export function formatFileToc(dirPath: string, files: DirFileSummary[]): string 
 }
 
 export function formatProjectToc(
-  rootPath: string,
-  dirs: DirSummary[],
-  rootFiles: DirFileSummary[]
+    rootPath: string,
+    dirs: DirSummary[],
+    rootFiles: DirFileSummary[]
 ): string {
   const out: string[] = [];
   const totalFiles = dirs.reduce((n, d) => n + d.fileCount, 0) + rootFiles.length;
   const totalLines =
-    dirs.reduce((n, d) => n + d.totalLines, 0) +
-    rootFiles.reduce((n, f) => n + f.totalLines, 0);
+      dirs.reduce((n, d) => n + d.totalLines, 0) +
+      rootFiles.reduce((n, f) => n + f.totalLines, 0);
   out.push(
-    `// ==== ${rootPath}/ — ${dirs.length} dirs, ${totalFiles} files, ${totalLines.toLocaleString("en-US")} lines ====`
+      `// ==== ${rootPath}/ — ${dirs.length} dirs, ${totalFiles} files, ${totalLines.toLocaleString("en-US")} lines ====`
   );
-  const nameW = Math.max(...dirs.map((d) => d.dirName.length + 1), ...rootFiles.map((f) => f.fileName.length), 4) + 2;
+  const nameW = Math.max(...dirs.map((d) => d.dirName.length + 1), ...rootFiles.map((f) => f.fileName.length + (f.isTest ? 7 : 0)), 4) + 2;
   for (const d of dirs) {
     out.push(
-      `${(d.dirName + "/").padEnd(nameW)} ${String(d.fileCount).padStart(3)} files   ${capNames(d.topExports)}`
+        `${(d.dirName + "/").padEnd(nameW)} ${String(d.fileCount).padStart(3)} files   ${capNames(d.topExports, DIR_ROW_NAME_CAP)}`
     );
   }
   for (const f of rootFiles) {
-    const desc = f.barrel ? `barrel: re-exports ${f.reexports.join(", ")}` : capNames(f.exportNames);
-    out.push(`${f.fileName.padEnd(nameW)} ${"".padStart(9)} ${desc}`);
+    const desc = f.barrel ? `barrel: re-exports ${capList(f.reexports)}` : capNames(f.exportNames, FILE_ROW_NAME_CAP);
+    const tag = f.isTest ? " [test]" : "";
+    out.push(`${(f.fileName + tag).padEnd(nameW)} ${String(f.totalLines + "L").padStart(9)} ${desc}${tocDoc(f)}`);
   }
   if (dirs.length > 0) {
     out.push("");
@@ -264,10 +283,26 @@ export function formatProjectToc(
   return out.join("\n");
 }
 
-function capNames(names: string[]): string {
-  if (names.length === 0) return "(no exports)";
-  if (names.length <= NAME_CAP) return names.join(", ");
-  return names.slice(0, NAME_CAP).join(", ") + `, +${names.length - NAME_CAP} more`;
+const REEXPORT_CAP = 8;
+
+/** Cap a plain list (no dedup/junk rules — used for barrel re-export specifiers). */
+function capList(items: string[], cap = REEXPORT_CAP): string {
+  if (items.length <= cap) return items.join(", ");
+  return items.slice(0, cap).join(", ") + `, +${items.length - cap} more`;
+}
+
+function capNames(names: string[], cap: number): string {
+  // Dedupe (identical names recur across overloads/re-exports) and drop
+  // single-character junk names that carry no orientation value.
+  const seen = new Set<string>();
+  const clean = names.filter((n) => {
+    if (n.length < 2 || seen.has(n)) return false;
+    seen.add(n);
+    return true;
+  });
+  if (clean.length === 0) return "(no exports)";
+  if (clean.length <= cap) return clean.join(", ");
+  return clean.slice(0, cap).join(", ") + `, +${clean.length - cap} more`;
 }
 
 function countErrors(model: FileHeaderModel): number {
