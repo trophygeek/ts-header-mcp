@@ -85,7 +85,7 @@ server.registerTool(
   },
   async (args) => {
     // 1. Try to fetch roots from client to support multi-workspace/global setup
-    let clientRoots: string[] = [];
+    const clientRoots: string[] = [];
     try {
       const result = await server.server.listRoots();
       if (result && result.roots) {
@@ -100,7 +100,7 @@ server.registerTool(
           }
         }
       }
-    } catch (err) {
+    } catch {
       // client might not support roots, or not connected yet
     }
 
