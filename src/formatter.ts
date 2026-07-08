@@ -397,18 +397,6 @@ function splitProperties(content: string): string[] {
   return props;
 }
 
-function extractPropertyName(prop: string): string {
-  let s = prop.trim();
-  s = s.replace(/^(readonly|public|private|protected)\s+/, "");
-  // Match identifier or string/number literal key
-  const match = s.match(/^("([^"\\]|\\.)*"|'([^'\\]|\\.)*'|`([^`\\]|\\.)*`|[a-zA-Z_$][a-zA-Z0-9_$]*\??)/);
-  if (match) {
-    let name = match[0];
-    if (name.endsWith("?")) name = name.slice(0, -1);
-    return name;
-  }
-  return s;
-}
 
 function truncateTypeAtSafeBoundary(typeStr: string, cap: number): string {
   if (typeStr.length <= cap) return typeStr;
@@ -421,46 +409,50 @@ function truncateTypeAtSafeBoundary(typeStr: string, cap: number): string {
   return typeStr;
 }
 
-export function elideType(typeStr: string, cap = 120): string {
-  if (typeStr.length <= cap) return typeStr;
+export function elideType(typeStr: string): string {
+  return elideObjectTypesInString(typeStr);
+}
 
-  const openIdx = typeStr.indexOf("{");
-  if (openIdx === -1) {
-    // If it has no object type, it keeps wrapping fully (wrap-and-render-full)
-    return typeStr;
-  }
+function elideObjectTypesInString(str: string): string {
+  let result = "";
+  let i = 0;
+  while (i < str.length) {
+    if (str[i] === "{") {
+      const closeIdx = findMatchingBrace(str, i);
+      if (closeIdx !== -1) {
+        const content = str.slice(i + 1, closeIdx);
+        // Process nested first
+        const processedContent = elideObjectTypesInString(content);
+        const props = splitProperties(processedContent);
 
-  const closeIdx = findMatchingBrace(typeStr, openIdx);
-  if (closeIdx === -1) return typeStr;
+        let finalObjectType: string;
+        const processedObjectType = "{" + processedContent + "}";
+        if (processedObjectType.length > 200 && props.length > 4) {
+          // Elide
+          const keptProps = props.slice(0, 3);
+          const remaining = props.length - 3;
+          const elidedPart = `…${remaining} more`;
+          const candidateContent = keptProps.join("; ") + "; " + elidedPart;
+          finalObjectType = "{" + candidateContent + "}";
+        } else {
+          finalObjectType = processedObjectType;
+        }
 
-  const prefix = typeStr.slice(0, openIdx + 1);
-  const suffix = typeStr.slice(closeIdx);
-  const content = typeStr.slice(openIdx + 1, closeIdx);
-
-  const props = splitProperties(content);
-  if (props.length === 0) return typeStr;
-
-  let formattedContent = "";
-  for (let k = 1; k <= props.length; k++) {
-    const keptProps = props.slice(0, k).map(extractPropertyName);
-    const remaining = props.length - k;
-    const elidedPart = remaining > 0 ? `…${remaining} more` : "";
-    const candidateContent = keptProps.join("; ") + (keptProps.length ? "; " : "") + elidedPart;
-    const candidateFull = prefix + " " + candidateContent + " " + suffix;
-    if (candidateFull.length <= cap || k === 1) {
-      formattedContent = candidateContent;
-    } else {
-      break;
+        result += finalObjectType;
+        i = closeIdx + 1;
+        continue;
+      }
     }
+    result += str[i];
+    i++;
   }
-
-  return prefix + " " + formattedContent + " " + suffix;
+  return result;
 }
 
 function getRenderText(e: DeclEntry): string {
   const targetKinds = new Set(["const", "let", "property", "method", "accessor", "constructor", "function"]);
   if (targetKinds.has(e.kind)) {
-    return elideType(e.text, 120);
+    return elideType(e.text);
   }
   return e.text;
 }

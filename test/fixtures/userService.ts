@@ -135,6 +135,7 @@ export const createBooking = endpoint({
     spotId: "",
     idempotencyKey: "",
     veryLongFieldNameToInflateTheRenderedTypeStringPastTheCapForTesting: 0,
+    anotherFieldToInflateThisOverTwoHundredCharactersAndMoreThanFourProperties: "",
   },
   handler: async (args) => {
     const held = [args.spotId];

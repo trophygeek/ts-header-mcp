@@ -227,16 +227,70 @@ describe("special files and budgets", () => {
 });
 
 describe("structural elision", () => {
-  it("structurally elides object/promise types over the cap", () => {
+  it("renders { bookingStatus: string; offerExpiry?: number | undefined; } verbatim, preserving optionality and types", () => {
     const e = entry({
-      kind: "const",
-      name: "myVal",
-      text: "export const myVal: Promise<{ _id: string; userId: string; autoPickFallback: boolean; status: string; created: number; extraField: boolean; anotherExtraFieldOfSignificantLength: string; yetAnotherField: number }>",
+      kind: "function",
+      name: "isOfferClaimable",
+      text: "export function isOfferClaimable(booking: { bookingStatus: string; offerExpiry?: number | undefined; }): boolean",
       line: 1,
       endLine: 1,
     });
     const out = formatFileHeader(model([e]));
-    assert.match(out, /myVal: Promise<\{\s*_id; userId; autoPickFallback;.*…\d+ more\s*\}>/);
+    assert.ok(out.includes("bookingStatus: string; offerExpiry?: number | undefined"));
+    assert.ok(!out.includes("…"));
+  });
+
+  it("renders a 2-property args object in full even when signature exceeds 120 chars", () => {
+    const e = entry({
+      kind: "function",
+      name: "createBookingWithAQuiteLongName",
+      text: "export function createBookingWithAQuiteLongName(args: { idempotencyKey: string; bookingId: Id<\"bookings\">; }): Promise<void>",
+      line: 1,
+      endLine: 1,
+    });
+    const out = formatFileHeader(model([e]));
+    assert.ok(out.includes("idempotencyKey: string; bookingId: Id<\"bookings\">"));
+    assert.ok(!out.includes("…"));
+  });
+
+  it("renders a 3-property inline parameter type in full", () => {
+    const e = entry({
+      kind: "function",
+      name: "f",
+      text: "export function f(param: { a: string; b: number; c: boolean; }): void",
+      line: 1,
+      endLine: 1,
+    });
+    const out = formatFileHeader(model([e]));
+    assert.ok(out.includes("a: string; b: number; c: boolean"));
+    assert.ok(!out.includes("…"));
+  });
+
+  it("elides an object type >200 chars with >4 properties to first 3 full properties + …N more", () => {
+    const e = entry({
+      kind: "const",
+      name: "myVal",
+      text: "export const myVal: { veryLongPropNameNumberOne: string; veryLongPropNameNumberTwo: number; veryLongPropNameNumberThree: boolean; veryLongPropNameNumberFour: string; veryLongPropNameNumberFive: number; veryLongPropNameNumberSix: boolean }",
+      line: 1,
+      endLine: 1,
+    });
+    const out = formatFileHeader(model([e]));
+    assert.match(out, /veryLongPropNameNumberOne: string; veryLongPropNameNumberTwo: number; veryLongPropNameNumberThree: boolean; …3 more/);
+    assert.doesNotMatch(out, /veryLongPropNameNumberFour/);
+  });
+
+  it("renders a long signature with modest type nodes in full without any elision", () => {
+    const sig = "export function myLongSignatureWithModestTypes(a: string, b: number, c: boolean, d: string, e: number, f: boolean): { success: boolean; msg: string; }";
+    const e = entry({
+      kind: "function",
+      name: "myLongSignatureWithModestTypes",
+      text: sig,
+      line: 1,
+      endLine: 1,
+    });
+    const out = formatFileHeader(model([e]));
+    assert.ok(out.includes(sig));
+    assert.ok(!out.includes("…"));
   });
 
   it("retains non-object types in full without character-level cuts (wrap-and-render-full)", () => {

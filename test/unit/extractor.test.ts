@@ -180,7 +180,7 @@ describe("framework-style consts (Convex regression)", () => {
 
   it("formats real oversized inferred type with structural elision and no mid-identifier cuts", () => {
     const out = formatFileHeader(models.exports);
-    assert.match(out, /profileId; …3 more/);
+    assert.match(out, /profileId: UserId; spotId: string; idempotencyKey: string; …2 more/);
     assert.doesNotMatch(out, /veryLongFieldNameToInflateTheRenderedTypeStringPastTheCapForTesting…/);
   });
 
