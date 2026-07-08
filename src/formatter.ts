@@ -122,7 +122,7 @@ function renderEntry(
   renderDoc(e, out, opts, indent, "after");
 
   if (hasChildren) {
-    renderEntries(e.children!, out, opts, indentLevel + 1);
+    renderEntries(e.children ?? [], out, opts, indentLevel + 1);
   }
   if (isContainer) out.push(indent + "}");
   if (indentLevel === 0 && !suppressTrailingBlank) out.push("");
@@ -397,17 +397,6 @@ function splitProperties(content: string): string[] {
   return props;
 }
 
-
-function truncateTypeAtSafeBoundary(typeStr: string, cap: number): string {
-  if (typeStr.length <= cap) return typeStr;
-  const safeChars = new Set([" ", "|", "&", "<", ">", ",", "(", ")", ";"]);
-  for (let i = cap - 2; i >= 0; i--) {
-    if (safeChars.has(typeStr[i])) {
-      return typeStr.slice(0, i).trim() + "…";
-    }
-  }
-  return typeStr;
-}
 
 export function elideType(typeStr: string): string {
   return elideObjectTypesInString(typeStr);

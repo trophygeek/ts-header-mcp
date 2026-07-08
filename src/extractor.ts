@@ -468,7 +468,7 @@ function memberModifiers(member: ts.ClassElement): string {
   if (hasModifier(member, ts.SyntaxKind.StaticKeyword)) parts.push("static");
   if (hasModifier(member, ts.SyntaxKind.AbstractKeyword)) parts.push("abstract");
   if (hasModifier(member, ts.SyntaxKind.ReadonlyKeyword)) parts.push("readonly");
-  const name = (member as any).name;
+  const name = (member as { name?: ts.PropertyName }).name;
   if (name && ts.isPrivateIdentifier(name)) parts.push("private");
   return parts.length ? parts.join(" ") + " " : "";
 }
@@ -606,7 +606,7 @@ function printedEntry(
 // ---------------------------------------------------------------------------
 
 function docInfo(node: ts.Node, sf: ts.SourceFile): DocInfo | undefined {
-  const jsDocs = (node as any).jsDoc as ts.JSDoc[] | undefined;
+  const jsDocs = (node as { jsDoc?: ts.JSDoc[] }).jsDoc;
   const tags = ts.getJSDocTags(node);
   const deprecated = tags.some((t) => t.tagName.text === "deprecated");
   if ((!jsDocs || jsDocs.length === 0) && !deprecated) return undefined;

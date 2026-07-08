@@ -121,7 +121,7 @@ export class ProjectManager {
 
   private createEntry(fileNames: Set<string>, options: ts.CompilerOptions): ProjectEntry {
     const versions = new Map<string, string>();
-    const entry: ProjectEntry = { service: undefined as any, fileNames, versions, lastUsed: Date.now() };
+    const entry: ProjectEntry = { service: undefined as unknown as ts.LanguageService, fileNames, versions, lastUsed: Date.now() };
 
     const host: ts.LanguageServiceHost = {
       getScriptFileNames: () => [...entry.fileNames],
@@ -165,7 +165,10 @@ export class ProjectManager {
         }
       }
       if (!oldestKey) return;
-      this.projects.get(oldestKey)!.service.dispose();
+      const oldestEntry = this.projects.get(oldestKey);
+      if (oldestEntry) {
+        oldestEntry.service.dispose();
+      }
       this.projects.delete(oldestKey);
     }
   }
