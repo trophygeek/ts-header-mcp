@@ -226,6 +226,33 @@ describe("special files and budgets", () => {
   });
 });
 
+describe("structural elision", () => {
+  it("structurally elides object/promise types over the cap", () => {
+    const e = entry({
+      kind: "const",
+      name: "myVal",
+      text: "export const myVal: Promise<{ _id: string; userId: string; autoPickFallback: boolean; status: string; created: number; extraField: boolean; anotherExtraFieldOfSignificantLength: string; yetAnotherField: number }>",
+      line: 1,
+      endLine: 1,
+    });
+    const out = formatFileHeader(model([e]));
+    assert.match(out, /myVal: Promise<\{\s*_id; userId; autoPickFallback;.*…\d+ more\s*\}>/);
+  });
+
+  it("retains non-object types in full without character-level cuts (wrap-and-render-full)", () => {
+    const veryLongUnion = "export type Union = A | B | C | D | E | F | G | H | I | J | K | L | M | N | O | P | Q | R | S | T | U | V | W | X | Y | Z | AA | BB | CC | DD | EE";
+    const e = entry({
+      kind: "type",
+      name: "Union",
+      text: veryLongUnion,
+      line: 1,
+      endLine: 1,
+    });
+    const out = formatFileHeader(model([e]));
+    assert.ok(out.includes(veryLongUnion), "union type remains fully intact");
+  });
+});
+
 describe("directory TOCs", () => {
   const file = (partial: Partial<DirFileSummary> & Pick<DirFileSummary, "fileName">): DirFileSummary => ({
     totalLines: 10,

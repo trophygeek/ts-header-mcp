@@ -173,4 +173,4 @@ Whether `docs:"auto"` (include the sentence only when it adds information beyond
 
 ## 12. Milestones
 
-**M1 — extractor + formatter, single file, exports depth, no cache.** Prove the format on real files including broken ones. **M2 — LanguageService project manager, cache, watcher, directory/project TOCs.** **M3 — MCP wiring, tool description tuning, token budgeting.** **M4 — eval:** run a weak model (e.g., a small local model or Haiku-class) on navigation tasks in a mid-size repo with and without ts-header; measure files-read and wrong-file-reads.
+**M1 — extractor + formatter, single file, exports depth, no cache.** Prove the format on real files including broken ones. **M2 — LanguageService project manager, cache, watcher, directory/project TOCs.** **M3 — MCP wiring, tool description tuning, token budgeting.** **navigation eval (design-doc milestone M4) — eval:** run a weak model (e.g., a small local model or Haiku-class) on navigation tasks in a mid-size repo with and without ts-header; measure files-read and wrong-file-reads.

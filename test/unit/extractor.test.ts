@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extract } from "../../src/extractor.js";
+import { formatFileHeader } from "../../src/formatter.js";
 import type { Depth, FileHeaderModel } from "../../src/model.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -170,11 +171,17 @@ describe("framework-style consts (Convex regression)", () => {
     assert.equal(e.dense, true);
   });
 
-  it("caps rendered type length with an ellipsis", () => {
+  it("does not cap rendered type length in extractor", () => {
     const e = byName(models.exports, "createBooking")[0];
     const type = e.text.replace(/^export const createBooking: /, "");
-    assert.ok(type.length <= 160, `type is ${type.length} chars`);
-    assert.ok(type.endsWith("…"), "elided with …");
+    assert.ok(type.length > 200, `type is ${type.length} chars`);
+    assert.ok(!type.endsWith("…"), "not elided with … in extractor");
+  });
+
+  it("formats real oversized inferred type with structural elision and no mid-identifier cuts", () => {
+    const out = formatFileHeader(models.exports);
+    assert.match(out, /profileId; …3 more/);
+    assert.doesNotMatch(out, /veryLongFieldNameToInflateTheRenderedTypeStringPastTheCapForTesting…/);
   });
 
   it("strips import(...) qualifiers from rendered types", () => {

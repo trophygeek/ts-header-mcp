@@ -81,7 +81,7 @@ function renderEntries(
         out.push(`${indent}// -- ${denseLabel(run)}: L${from}-${to} --`);
         for (const e of run) {
           renderDoc(e, out, opts, indent, "before");
-          out.push(indent + e.text + deprecatedMark(e));
+          out.push(indent + getRenderText(e) + deprecatedMark(e));
           renderDoc(e, out, opts, indent, "after");
         }
         out.push("");
@@ -113,8 +113,9 @@ function renderEntry(
   const hasChildren = e.children && e.children.length > 0;
   const isContainer = e.kind === "class" || e.kind === "namespace";
   const openBrace = isContainer ? " {" : "";
-  const firstLine = indent + e.text.split("\n")[0] + openBrace;
-  const rest = e.text.split("\n").slice(1).map((l) => indent + l);
+  const text = getRenderText(e);
+  const firstLine = indent + text.split("\n")[0] + openBrace;
+  const rest = text.split("\n").slice(1).map((l) => indent + l);
 
   out.push(padAnnotate(firstLine, annotation(e)));
   out.push(...rest);
@@ -163,7 +164,8 @@ function renderDoc(
     return;
   }
   if (opts.docs === "brief" && e.doc.brief) {
-    const briefPosition = e.text.includes("\n") ? "before" : "after";
+    const text = getRenderText(e);
+    const briefPosition = text.includes("\n") ? "before" : "after";
     if (position !== briefPosition) return;
     if (briefPosition === "before") out.push(indent + "// " + e.doc.brief);
     else out.push(indent + "    // " + e.doc.brief);
@@ -226,6 +228,31 @@ export interface DirSummary {
   fileCount: number;
   totalLines: number;
   topExports: string[];
+}
+
+export interface MatchingFileSummary {
+  relPath: string;
+  totalLines: number;
+  exportNames: string[];
+  isTest: boolean;
+  absPath?: string;
+}
+
+export function formatRecursiveFileList(
+  dirPath: string,
+  files: MatchingFileSummary[]
+): string {
+  const out: string[] = [];
+  out.push(`// ==== ${dirPath}/ — ${files.length} matching file${files.length === 1 ? "" : "s"} ====`);
+  const pathW = Math.max(...files.map((f) => (f.relPath + (f.isTest ? " [test]" : "")).length), 4) + 2;
+  for (const f of files) {
+    const tag = f.isTest ? " [test]" : "";
+    const desc = capNames(f.exportNames, FILE_ROW_NAME_CAP);
+    out.push(
+      `${(f.relPath + tag).padEnd(pathW)} ${String(f.totalLines + "L").padStart(6)}   ${desc}`
+    );
+  }
+  return out.join("\n");
 }
 
 const FILE_ROW_NAME_CAP = 24; // directory (file TOC) rows: near-complete
@@ -291,7 +318,7 @@ function capList(items: string[], cap = REEXPORT_CAP): string {
   return items.slice(0, cap).join(", ") + `, +${items.length - cap} more`;
 }
 
-function capNames(names: string[], cap: number): string {
+export function capNames(names: string[], cap: number): string {
   // Dedupe (identical names recur across overloads/re-exports) and drop
   // single-character junk names that carry no orientation value.
   const seen = new Set<string>();
@@ -315,4 +342,125 @@ function countErrors(model: FileHeaderModel): number {
   };
   walk(model.entries);
   return n;
+}
+
+function findMatchingBrace(str: string, startIdx: number): number {
+  let depth = 0;
+  for (let i = startIdx; i < str.length; i++) {
+    if (str[i] === "{") depth++;
+    else if (str[i] === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function splitProperties(content: string): string[] {
+  const props: string[] = [];
+  let current = "";
+  let braces = 0;
+  let parens = 0;
+  let brackets = 0;
+  let inQuote: string | null = null;
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i];
+    if (inQuote) {
+      if (char === inQuote && content[i - 1] !== "\\") {
+        inQuote = null;
+      }
+      current += char;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      inQuote = char;
+      current += char;
+      continue;
+    }
+    if (char === "{") braces++;
+    else if (char === "}") braces--;
+    else if (char === "(") parens++;
+    else if (char === ")") parens--;
+    else if (char === "[") brackets++;
+    else if (char === "]") brackets--;
+
+    if (braces === 0 && parens === 0 && brackets === 0 && (char === ";" || char === ",")) {
+      const trimmed = current.trim();
+      if (trimmed) props.push(trimmed);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  const trimmed = current.trim();
+  if (trimmed) props.push(trimmed);
+  return props;
+}
+
+function extractPropertyName(prop: string): string {
+  let s = prop.trim();
+  s = s.replace(/^(readonly|public|private|protected)\s+/, "");
+  // Match identifier or string/number literal key
+  const match = s.match(/^("([^"\\]|\\.)*"|'([^'\\]|\\.)*'|`([^`\\]|\\.)*`|[a-zA-Z_$][a-zA-Z0-9_$]*\??)/);
+  if (match) {
+    let name = match[0];
+    if (name.endsWith("?")) name = name.slice(0, -1);
+    return name;
+  }
+  return s;
+}
+
+function truncateTypeAtSafeBoundary(typeStr: string, cap: number): string {
+  if (typeStr.length <= cap) return typeStr;
+  const safeChars = new Set([" ", "|", "&", "<", ">", ",", "(", ")", ";"]);
+  for (let i = cap - 2; i >= 0; i--) {
+    if (safeChars.has(typeStr[i])) {
+      return typeStr.slice(0, i).trim() + "…";
+    }
+  }
+  return typeStr;
+}
+
+export function elideType(typeStr: string, cap = 120): string {
+  if (typeStr.length <= cap) return typeStr;
+
+  const openIdx = typeStr.indexOf("{");
+  if (openIdx === -1) {
+    // If it has no object type, it keeps wrapping fully (wrap-and-render-full)
+    return typeStr;
+  }
+
+  const closeIdx = findMatchingBrace(typeStr, openIdx);
+  if (closeIdx === -1) return typeStr;
+
+  const prefix = typeStr.slice(0, openIdx + 1);
+  const suffix = typeStr.slice(closeIdx);
+  const content = typeStr.slice(openIdx + 1, closeIdx);
+
+  const props = splitProperties(content);
+  if (props.length === 0) return typeStr;
+
+  let formattedContent = "";
+  for (let k = 1; k <= props.length; k++) {
+    const keptProps = props.slice(0, k).map(extractPropertyName);
+    const remaining = props.length - k;
+    const elidedPart = remaining > 0 ? `…${remaining} more` : "";
+    const candidateContent = keptProps.join("; ") + (keptProps.length ? "; " : "") + elidedPart;
+    const candidateFull = prefix + " " + candidateContent + " " + suffix;
+    if (candidateFull.length <= cap || k === 1) {
+      formattedContent = candidateContent;
+    } else {
+      break;
+    }
+  }
+
+  return prefix + " " + formattedContent + " " + suffix;
+}
+
+function getRenderText(e: DeclEntry): string {
+  const targetKinds = new Set(["const", "let", "property", "method", "accessor", "constructor", "function"]);
+  if (targetKinds.has(e.kind)) {
+    return elideType(e.text, 120);
+  }
+  return e.text;
 }

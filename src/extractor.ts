@@ -21,9 +21,9 @@ import type {
 const MAX_ERR_MSG = 90;
 const BRIEF_MAX = 100;
 /** Max rendered length for a variable/property type before eliding with … */
-const MAX_TYPE_LEN = 160;
+const MAX_TYPE_LEN = 999999;
 /** Max rendered length for a full signature line before eliding with … */
-const MAX_SIG_LEN = 200;
+const MAX_SIG_LEN = 999999;
 /** A body-less const is "dense" (groupable, no own annotation) only when small. */
 const DENSE_MAX_CONST_LINES = 5;
 /** Types/interfaces/enums stay groupable up to a larger span. */

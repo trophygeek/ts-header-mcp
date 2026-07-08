@@ -16,15 +16,17 @@ import {
   formatFileHeader,
   formatFileToc,
   formatProjectToc,
+  formatRecursiveFileList,
   type DirFileSummary,
   type DirSummary,
+  type MatchingFileSummary,
 } from "./formatter.js";
 import type { Depth, DocsMode, FileHeaderModel } from "./model.js";
 import { ProjectManager } from "./project.js";
 import type { ServerConfig } from "./config.js";
 import { GitIgnore } from "./ignore.js";
 
-const EXTRACTOR_VERSION = "2"; // bump when FileHeaderModel/extraction changes
+const EXTRACTOR_VERSION = "3"; // bump when FileHeaderModel/extraction changes
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "coverage", ".next"]);
 const TS_FILE = /\.(ts|tsx|mts|cts)$/;
 const DTS_FILE = /\.d\.(ts|mts|cts)$/;
@@ -106,8 +108,7 @@ export class Router {
     }
 
     if (stat.isDirectory()) {
-      const out = this.directory(abs, maxTokens, matcher);
-      return filterNote + out;
+      return this.directory(abs, maxTokens, matcher, req.filter);
     }
     if (!TS_FILE.test(abs)) {
       return `// ${req.path} is not a TypeScript file. ts_header handles .ts/.tsx; use your normal file-read tool for this one.`;
@@ -117,7 +118,7 @@ export class Router {
     if (matcher) {
       const entries = filterEntries(model.entries as unknown as DeclEntryLike[], matcher) as unknown as FileHeaderModel["entries"];
       if (entries.length === 0) {
-        return `// no symbols matching "${req.filter}" in ${this.rel(abs)} — retry without filter, or ts_header(".", {filter}) to search the project.`;
+        return `// no symbols matching "${req.filter}" in ${this.rel(abs)} — retry without filter, or ts_header(".", {filter}) to search the project.\n// hint: try a shorter/partial filter, or grep for body text`;
       }
       model = { ...model, entries };
     }
@@ -160,7 +161,96 @@ export class Router {
     return model;
   }
 
-  private directory(absDir: string, maxTokens: number, matcher?: NameMatcher): string {
+  private findMatchingFiles(
+    absDir: string,
+    matcher: NameMatcher
+  ): (MatchingFileSummary & { absPath: string })[] {
+    const results: (MatchingFileSummary & { absPath: string })[] = [];
+    const walk = (dir: string) => {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          if (
+            !SKIP_DIRS.has(e.name) &&
+            !e.name.startsWith(".") &&
+            !this.ignored(p, true)
+          ) {
+            walk(p);
+          }
+        } else if (TS_FILE.test(e.name) && !DTS_FILE.test(e.name) && !this.ignored(p, false)) {
+          const summary = this.summarizeFile(p, matcher);
+          if (summary && summary.exportNames.length > 0) {
+            results.push({
+              relPath: this.rel(p),
+              totalLines: summary.totalLines,
+              exportNames: summary.exportNames,
+              isTest: summary.isTest,
+              absPath: p,
+            });
+          }
+        }
+      }
+    };
+    walk(absDir);
+    return results.sort((a, b) => a.relPath.localeCompare(b.relPath));
+  }
+
+  private directory(
+    absDir: string,
+    maxTokens: number,
+    matcher?: NameMatcher,
+    filterStr?: string
+  ): string {
+    if (!matcher) {
+      return this.directoryGrouped(absDir, maxTokens);
+    }
+
+    const matchingFiles = this.findMatchingFiles(absDir, matcher);
+
+    if (matchingFiles.length === 0) {
+      const rel = this.rel(absDir) || ".";
+      const entries = fs.readdirSync(absDir, { withFileTypes: true });
+      const subdirs = entries.filter((e) => e.isDirectory() && !SKIP_DIRS.has(e.name) && !e.name.startsWith("."));
+      const suffix = subdirs.length > 0 ? "under" : "in";
+      return `// no symbols matching the filter ${suffix} ${rel}/\n// hint: try a shorter/partial filter, or grep for body text`;
+    }
+
+    if (matchingFiles.length === 1) {
+      const single = matchingFiles[0];
+      const model = this.fileModel(single.absPath, "exports");
+      if (model) {
+        const opts = {
+          depth: "exports" as Depth,
+          docs: this.config.docsDefault,
+          maxTokens,
+          denseGroupMinLines: this.config.denseGroupMinLines,
+        };
+        const header = formatFileHeader(model, opts);
+        return `// [filter: "${filterStr}" — matched 1 file; showing full header]\n${header}`;
+      }
+    }
+
+    // Multiple files case
+    const relDir = this.rel(absDir) || ".";
+    const recursiveList = formatRecursiveFileList(relDir, matchingFiles);
+    const tokens = Math.ceil(recursiveList.length / 4);
+
+    if (tokens <= maxTokens) {
+      return `// [filter: "${filterStr}" — matching symbols only]\n` + recursiveList;
+    }
+
+    // Fallback to directory-grouped rendering
+    const grouped = this.directoryGrouped(absDir, maxTokens, matcher);
+    return `// [filter: "${filterStr}" — matching symbols only]\n${grouped}\n// hint: too many matching files to list; narrow with a more specific filter`;
+  }
+
+  private directoryGrouped(absDir: string, maxTokens: number, matcher?: NameMatcher): string {
     const entries = fs.readdirSync(absDir, { withFileTypes: true });
     const tsFiles = entries
       .filter((e) => e.isFile() && TS_FILE.test(e.name) && !DTS_FILE.test(e.name))

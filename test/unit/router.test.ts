@@ -155,21 +155,40 @@ describe("filter parameter", () => {
     assert.match(out, /\[filter: "getUser"/);
   });
 
-  it("filters directory listings to files with matching exports", () => {
-    const out = router.handle({ path: "src/services", filter: "token" });
-    assert.ok(out.includes("verifyToken"));
-    assert.ok(!out.includes("userService.ts"));
+  it("recursively lists all matching files with workspace-relative paths, line counts, and matching symbols", () => {
+    // filter "User" matches src/services/userService.ts, src/models/user.ts, src/models/adminUser.ts
+    const out = router.handle({ path: ".", filter: "User" });
+    assert.match(out, /src\/models\/adminUser\.ts\s+2L\s+User/);
+    assert.match(out, /src\/models\/user\.ts\s+2L\s+User/);
+    assert.match(out, /src\/services\/userService\.ts\s+7L\s+UserService, createUserService/);
   });
 
-  it("filters the project overview across directories", () => {
-    const out = router.handle({ path: "src", filter: "^retry$" });
-    assert.ok(out.includes("utils/"));
-    assert.ok(!out.includes("services/"));
+  it("promotes to full header when a filtered request resolves to exactly one matching file", () => {
+    // filter "createUserService" matches only src/services/userService.ts
+    const out = router.handle({ path: ".", filter: "createUserService" });
+    assert.match(out, /\[filter: "createUserService" — matched 1 file; showing full header\]/);
+    // Should show non-matching symbols too (the whole file)
+    assert.ok(out.includes("class UserService"), "contains UserService class");
+    assert.ok(out.includes("getUser(id: string)"), "contains getUser method");
   });
 
-  it("says so when nothing matches", () => {
+  it("falls back to directory-grouped TOC with a hint when recursive listing exceeds budget", () => {
+    const out = router.handle({ path: ".", filter: "User", max_tokens: 15 });
+    // Should fall back to directory-grouped project TOC
+    assert.match(out, /src\/\s+7 files/);
+    assert.match(out, /\/\/ hint: too many matching files to list; narrow with a more specific filter/);
+  });
+
+  it("says so and appends a hint when filter matches nothing in directory or project overview", () => {
+    const out = router.handle({ path: ".", filter: "zzz_nothing" });
+    assert.match(out, /no symbols matching the filter under \.\//);
+    assert.match(out, /\/\/ hint: try a shorter\/partial filter, or grep for body text/);
+  });
+
+  it("says so and appends a hint when filter matches nothing in a single file", () => {
     const out = router.handle({ path: "src/services/userService.ts", filter: "zzz_nothing" });
-    assert.match(out, /no symbols matching/);
+    assert.match(out, /no symbols matching "zzz_nothing" in src\/services\/userService\.ts/);
+    assert.match(out, /\/\/ hint: try a shorter\/partial filter, or grep for body text/);
   });
 });
 
