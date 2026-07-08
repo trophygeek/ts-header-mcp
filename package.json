@@ -13,6 +13,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "validate": "pnpm typecheck && pnpm lint --no-inline-config && pnpm test",
     "test": "pnpm typecheck && tsx --test \"test/unit/*.test.ts\"",
     "smoke-test": "tsx test/smoke.ts",
     "start": "node dist/server.js"
@@ -24,6 +26,10 @@
   },
   "devDependencies": {
     "tsx": "^4.19.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "eslint": "^10.6.0",
+    "typescript-eslint": "^8.62.1",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "prettier": "^3.9.3"
   }
 }
