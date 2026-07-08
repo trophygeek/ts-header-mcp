@@ -57,12 +57,32 @@ cd ~/tools/ts-header
 npm install
 npm test                     # quiet unit suite (extractor, formatter, router)
 npm run smoke-test           # verbose: prints full example headers for eyeballing
-npm run build                # -> dist/server.js
+npm run build                # -> dist/server.js and dist/cli.js
 ```
 
 Cloning outside your working repositories (e.g. `~/tools`) keeps the server out of your projects' version control.
 
 Note for TypeScript 6.0+: the compiler no longer auto-includes packages from `node_modules/@types`, so the project tsconfig sets `"types": ["node"]` explicitly. If you see `TS2591: Cannot find name 'process'` during `npm run build`, that line is missing.
+
+## CLI Usage
+
+For non-MCP integrations or command-line scripting, you can run the CLI directly from the terminal.
+
+```bash
+# Run using node
+node dist/cli.js <workspaceRoot> <path> [options]
+
+# Or via the ts-header-cli command if installed/linked
+ts-header-cli <workspaceRoot> <path> [options]
+```
+
+### Options
+* `--depth=exports|all|deep` — Level of declaration detail to extract.
+* `--docs=none|brief|full` — JSDoc detail level.
+* `--max-tokens=N` — Approximate token budget limit.
+* `--filter=PATTERN` — RegEx pattern to filter symbols by name.
+
+The output is written to `stdout`, and any errors to `stderr` (exits with code `0` on success, `1` on error).
 
 ## Client setup
 
@@ -190,7 +210,7 @@ Other environment variables:
 
 ## Architecture
 
-`server.ts` (MCP layer, the only module that imports the SDK) → `router.ts` (path → project overview | directory listing | file header, plus the content-hash cache) → `formatter.ts` (all layout rules) ← `FileHeaderModel` (plain JSON contract in `model.ts`) ← `extractor.ts` (raw TypeScript compiler API) ← `project.ts` (nearest-tsconfig discovery, one long-lived `ts.LanguageService` per config, project-reference sources folded in, LRU eviction).
+`server.ts` (MCP layer, the only module that imports the SDK) and `cli.ts` (CLI entry point) → `router.ts` (path → project overview | directory listing | file header, plus the content-hash cache) → `formatter.ts` (all layout rules) ← `FileHeaderModel` (plain JSON contract in `model.ts`) ← `extractor.ts` (raw TypeScript compiler API) ← `project.ts` (nearest-tsconfig discovery, one long-lived `ts.LanguageService` per config, project-reference sources folded in, LRU eviction).
 
 The extractor sits behind the `FileHeaderModel` contract, so it can be replaced (for example by a tree-sitter implementation) without changes to the formatter, cache, or MCP layers. `ts-header-design.md` contains the design rationale and the decision log.
 

@@ -174,3 +174,31 @@ Whether `docs:"auto"` (include the sentence only when it adds information beyond
 ## 12. Milestones
 
 **M1 — extractor + formatter, single file, exports depth, no cache.** Prove the format on real files including broken ones. **M2 — LanguageService project manager, cache, watcher, directory/project TOCs.** **M3 — MCP wiring, tool description tuning, token budgeting.** **navigation eval (design-doc milestone M4) — eval:** run a weak model (e.g., a small local model or Haiku-class) on navigation tasks in a mid-size repo with and without ts-header; measure files-read and wrong-file-reads.
+
+## 13. Alternate approaches considered
+
+## Comparison at a Glance
+
+| | Syntax-only API | Full checker | `.d.ts` emit | ts-morph | tree-sitter |
+|---|---|---|---|---|---|
+| Latency (per file) | ms | ms after warm-up; slow cold start | seconds | ms | sub-ms |
+| Inferred types | ❌ | ✅ | ✅ | optional | ❌ |
+| Works on broken code | ✅ | mostly | ❌ | ✅ | ✅✅ |
+| Config-free | ✅ | ❌ | ❌ | mostly | ✅ |
+| Non-exported symbols | ✅ | ✅ | ❌ | ✅ | ✅ |
+| Multi-language future | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+
+Standalone MCP vs. Extension-Hosted
+
+| | Standalone Node MCP server | VS Code extension (A) | Extension-wrapped MCP (B) |
+|---|---|---|---|
+| Claude Code (terminal) | ✅ | ❌ | ❌ (but server still runs standalone) |
+| Claude Desktop / Cursor / Windsurf / Zed | ✅ | ❌ | VS Code only |
+| Copilot agent mode | ✅ (VS Code supports MCP) | ✅ | ✅ |
+| Headless / CI / scripted agents | ✅ | ❌ | ❌ |
+| Sees unsaved editor buffers | ❌ (disk only) | ✅ | ❌ |
+| File watching | roll your own or mtime checks | free (`FileSystemWatcher`) | roll your own |
+| Distribution | manual config / npm | Marketplace | Marketplace |
+| Test surface | plain Node, trivial | extension host harness | mostly plain Node |
+| Lifecycle complexity | you own it (simple) | activation events, extension host | VS Code manages spawn |
