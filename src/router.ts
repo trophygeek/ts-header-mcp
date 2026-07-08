@@ -9,6 +9,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { extract } from "./extractor.js";
 import {
@@ -287,6 +288,9 @@ export class Router {
 
   private resolveInWorkspace(p: string): string {
     const abs = path.resolve(this.config.workspaceRoot, p);
+    if (abs === path.parse(abs).root || abs === os.homedir() || os.homedir().startsWith(abs + path.sep)) {
+      throw new Error(`path "${p}" resolved to "${abs}" which is the filesystem root, home directory, or an ancestor — refusing to scan.`);
+    }
     const rel = path.relative(this.config.workspaceRoot, abs);
     if (rel.startsWith("..") || path.isAbsolute(rel)) {
       throw new Error(`path escapes workspace: ${p}`);

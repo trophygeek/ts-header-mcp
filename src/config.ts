@@ -29,9 +29,36 @@ export interface ServerConfig {
   useGitignore: boolean;
 }
 
+/**
+ * Returns an error message if `resolved` is the filesystem root, the home
+ * directory, or an ancestor of the home directory. Returns undefined when safe.
+ */
+export function unsafeWorkspaceReason(resolved: string): string | undefined {
+  const root = path.parse(resolved).root;
+  const home = os.homedir();
+  if (
+    resolved === root ||
+    resolved === home ||
+    home.startsWith(resolved + path.sep)
+  ) {
+    return (
+      `workspaceRoot resolved to "${resolved}" which is the filesystem root, ` +
+      `the home directory, or an ancestor of it — this would scan system ` +
+      `directories. Pass an explicit project path as the second arg to the server ` +
+      `(e.g. "args": ["dist/server.js", "/path/to/project"]).`
+    );
+  }
+  return undefined;
+}
+
 export function loadConfig(workspaceRoot: string): ServerConfig {
+  const resolved = path.resolve(workspaceRoot);
+  const reason = unsafeWorkspaceReason(resolved);
+  if (reason) {
+    console.error(`[ts-header] WARNING: ${reason}`);
+  }
   return {
-    workspaceRoot: path.resolve(workspaceRoot),
+    workspaceRoot: resolved,
     cacheDir: process.env.TS_HEADER_CACHE === "1" ? resolveCacheDir(workspaceRoot) : null,
     docsDefault: parseDocs(process.env.TS_HEADER_DOCS) ?? "brief",
     denseGroupMinLines: intEnv("TS_HEADER_DENSE_MIN", 6),

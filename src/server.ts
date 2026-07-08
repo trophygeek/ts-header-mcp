@@ -10,11 +10,33 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { loadConfig } from "./config.js";
+import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import path from "node:path";
+import { loadConfig, unsafeWorkspaceReason } from "./config.js";
 import { Router } from "./router.js";
 
 const config = loadConfig(process.argv[2] ?? process.cwd());
-const router = new Router(config);
+const unsafeReason = unsafeWorkspaceReason(config.workspaceRoot);
+
+const routers = new Map<string, Router>();
+
+function getRouter(workspaceRoot: string): Router {
+  let r = routers.get(workspaceRoot);
+  if (!r) {
+    const rootConfig = {
+      ...config,
+      workspaceRoot,
+    };
+    r = new Router(rootConfig);
+    routers.set(workspaceRoot, r);
+  }
+  return r;
+}
+
+if (!unsafeReason) {
+  routers.set(config.workspaceRoot, new Router(config));
+}
 
 const server = new McpServer({ name: "ts-header", version: "0.1.0" });
 
@@ -62,8 +84,66 @@ server.registerTool(
     },
   },
   async (args) => {
+    // 1. Try to fetch roots from client to support multi-workspace/global setup
+    let clientRoots: string[] = [];
     try {
-      const text = router.handle({
+      const result = await server.server.listRoots();
+      if (result && result.roots) {
+        for (const r of result.roots) {
+          if (r.uri.startsWith("file://")) {
+            try {
+              const p = fileURLToPath(r.uri);
+              if (!unsafeWorkspaceReason(p)) {
+                clientRoots.push(p);
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch (err) {
+      // client might not support roots, or not connected yet
+    }
+
+    let chosenRoot: string | undefined;
+
+    if (clientRoots.length > 0) {
+      // Try to match the path to one of the roots
+      if (args.path && args.path !== ".") {
+        for (const root of clientRoots) {
+          const fullPath = path.resolve(root, args.path);
+          if (fs.existsSync(fullPath)) {
+            chosenRoot = root;
+            break;
+          }
+        }
+      }
+      // If not matched, default to the first root
+      if (!chosenRoot) {
+        chosenRoot = clientRoots[0];
+      }
+    }
+
+    // Fallback to configured workspace root if safe
+    if (!chosenRoot && !unsafeReason) {
+      chosenRoot = config.workspaceRoot;
+    }
+
+    if (!chosenRoot) {
+      return {
+        content: [{
+          type: "text",
+          text: `// ts_header error: No safe workspace root could be determined.\n` +
+            `// Configured root: "${config.workspaceRoot}" (${unsafeReason ?? "safe"})\n` +
+            (clientRoots.length === 0 ? "// No safe roots returned by the IDE.\n" : "") +
+            `// Fix: configure the server with an explicit path in your MCP config args, e.g. "args": ["dist/server.js", "/path/to/project"]`,
+        }],
+        isError: true,
+      };
+    }
+
+    try {
+      const activeRouter = getRouter(chosenRoot);
+      const text = activeRouter.handle({
         path: args.path,
         depth: args.depth,
         docs: args.docs,
