@@ -191,6 +191,27 @@ test results, and the three smoke-test outputs.
 
 </details>
 
+### Mirica
+
+Mirica's custom MCP tools are sandboxed JavaScript files (fetch-only, no process spawning), so they cannot launch a stdio server. Instead, a small HTTP bridge (`http-server.mjs`, in this repo) wraps the same router and serves plain JSON on `127.0.0.1:7461`, and a Mirica tool file calls it via `fetch()`.
+
+```bash
+# 1. Build, then start the bridge (detached; survives closing the terminal)
+npm run build
+nohup node /path/to/ts-header/http-server.mjs >/tmp/ts-header-http.log 2>&1 &
+
+# 2. Install the tool file
+cp mirica-tool/ts_header.js \
+  ~/Library/Application\ Support/ArtificialNecessity/MiricaLLMData/custom-mcp-tools/
+#  (Windows: %LOCALAPPDATA%\ArtificialNecessity\MiricaLLMData\custom-mcp-tools\)
+```
+
+Then click **Reload Tools** in Mirica's Settings → MCP Tools. The tool appears as `ts_header__view` and takes an extra `workspace` argument (absolute path to the project to serve), since one bridge serves any number of workspaces.
+
+The bridge does not persist across reboots. To restart it, rerun the `nohup` line above — or just ask a Mirica agent to start it; the tool's error message on a failed connection includes the exact command. Check whether it is running with `curl -s http://127.0.0.1:7461/health`.
+
+If you change the bridge or the tool: restart the bridge (kill the `node .../http-server.mjs` process and rerun it) after rebuilding, and re-copy `mirica-tool/ts_header.js` + Reload Tools after editing the tool file.
+
 Whichever client you use, an instruction like step 6 above (in project rules, `.cursorrules`, or the equivalent) makes a real difference: without it, agents tend to fall back to reading whole files.
 
 ## Files, caching, and sandboxes
