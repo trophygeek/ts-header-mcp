@@ -32,6 +32,7 @@ function model(entries: DeclEntry[], partial: Partial<FileHeaderModel> = {}): Fi
     barrel: false,
     reexports: [],
     entries,
+    imports: [],
     fileErrors: [],
     skippedRanges: [],
     ...partial,
@@ -365,5 +366,105 @@ describe("directory TOCs", () => {
     );
     assert.match(out, /2 dirs, 5 files, 500 lines/);
     assert.match(out, /drill down: ts_header\("src\/services"\)/);
+  });
+});
+
+describe("includeImports", () => {
+  const imports = [
+    'import { mutation, query } from "./_generated/server";',
+    'import type { Doc } from "./_generated/dataModel";',
+    'import * as bookings from "@roar/domain";',
+  ];
+
+  it("does not render imports when includeImports is false (default)", () => {
+    const out = formatFileHeader(
+      model([entry({ name: "f", text: "export function f(): void" })], { imports }),
+    );
+    assert.ok(!out.includes("-- imports --"));
+    assert.ok(!out.includes("mutation"));
+  });
+
+  it("renders the import block when includeImports is true", () => {
+    const out = formatFileHeader(
+      model([entry({ name: "f", text: "export function f(): void" })], { imports }),
+      { includeImports: true },
+    );
+    assert.ok(out.includes("// -- imports --"));
+    assert.ok(out.includes('import { mutation, query } from "./_generated/server";'));
+    assert.ok(out.includes('import type { Doc } from "./_generated/dataModel";'));
+    assert.ok(out.includes('import * as bookings from "@roar/domain";'));
+    // Imports should appear between banner and entries
+    const importsIdx = out.indexOf("// -- imports --");
+    const entryIdx = out.indexOf("export function f(): void");
+    assert.ok(importsIdx < entryIdx, "imports block precedes entries");
+  });
+
+  it("elides a long named-import list to stay within 120 chars", () => {
+    const longImport =
+      'import { veryLongExportNameAlpha, veryLongExportNameBeta, veryLongExportNameGamma, veryLongExportNameDelta, veryLongExportNameEpsilon } from "./big-module";';
+    const out = formatFileHeader(
+      model([entry({ name: "f", text: "export function f(): void" })], { imports: [longImport] }),
+      { includeImports: true },
+    );
+    const importLine = out.split("\n").find((l) => l.includes("import {"));
+    assert.ok(importLine, "import line is present");
+    assert.ok(importLine!.length <= 120, `import line is ${importLine!.length} chars, expected <= 120`);
+    assert.ok(importLine!.includes("…"), "elided with …");
+    assert.ok(importLine!.includes("./big-module"), "module specifier preserved");
+  });
+
+  it("does not crash when model has no imports field (old cached model)", () => {
+    // Simulate an old persisted model without the imports field
+    const oldModel = model([entry({ name: "f", text: "export function f(): void" })]);
+    delete (oldModel as Record<string, unknown>).imports;
+    const out = formatFileHeader(oldModel, { includeImports: true });
+    // Should not throw, and should not contain imports section
+    assert.ok(!out.includes("-- imports --"));
+    assert.ok(out.includes("export function f(): void"));
+  });
+
+  it("does not render imports block when imports array is empty", () => {
+    const out = formatFileHeader(
+      model([entry({ name: "f", text: "export function f(): void" })], { imports: [] }),
+      { includeImports: true },
+    );
+    assert.ok(!out.includes("-- imports --"));
+  });
+});
+describe("file URL annotations (workspaceRoot)", () => {
+  it("emits markdown file:// links in annotations when workspaceRoot is set", () => {
+    const out = formatFileHeader(
+      model([entry({ name: "f", text: "export function f(): void", line: 7, endLine: 7 })]),
+      { workspaceRoot: "/ws" },
+    );
+    // Banner should have a markdown link to the file
+    assert.match(out, /\[src\/a\.ts\]\(file:\/\/\/ws\/src\/a\.ts\)/);
+    // Entry annotation should be a markdown link
+    assert.match(out, /\[L7\]\(file:\/\/\/ws\/src\/a\.ts#L7\)/);
+  });
+
+  it("emits range annotations as markdown links with L-L fragment", () => {
+    const out = formatFileHeader(
+      model([entry({ name: "f", text: "export function f(): void", line: 7, endLine: 12 })]),
+      { workspaceRoot: "/ws" },
+    );
+    assert.match(out, /\[L7-12\]\(file:\/\/\/ws\/src\/a\.ts#L7-L12\)/);
+  });
+
+  it("falls back to plain L-annotations when workspaceRoot is absent", () => {
+    const out = formatFileHeader(
+      model([entry({ name: "f", text: "export function f(): void", line: 7, endLine: 7 })]),
+    );
+    assert.match(out, /\/\/ L7\n/);
+    assert.ok(!out.includes("file://"));
+  });
+
+  it("uses file URLs in dense-block group headers", () => {
+    const run = [
+      entry({ kind: "type", name: "A", text: "export type A = string;", line: 10, endLine: 10, dense: true }),
+      entry({ kind: "interface", name: "B", text: "export interface B { x: number }", line: 11, endLine: 18, dense: true }),
+    ];
+    const out = formatFileHeader(model(run), { denseGroupMinLines: 6, workspaceRoot: "/ws" });
+    assert.match(out, /-- types: \[L10-18\]\(file:\/\/\/ws\/src\/a\.ts#L10-L18\) --/);
   });
 });

@@ -26,7 +26,7 @@ import { ProjectManager } from "./project.js";
 import type { ServerConfig } from "./config.js";
 import { GitIgnore } from "./ignore.js";
 
-const EXTRACTOR_VERSION = "3"; // bump when FileHeaderModel/extraction changes
+const EXTRACTOR_VERSION = "4"; // bump when FileHeaderModel/extraction changes
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "coverage", ".next"]);
 const TS_FILE = /\.(ts|tsx|mts|cts)$/;
 const DTS_FILE = /\.d\.(ts|mts|cts)$/;
@@ -39,6 +39,8 @@ export interface TsHeaderRequest {
   max_tokens?: number;
   /** Regex (case-insensitive) or substring matched against SYMBOL NAMES at every level. */
   filter?: string;
+  /** When true, include import statements in the header output. */
+  includeImports?: boolean;
 }
 
 type NameMatcher = (name: string) => boolean;
@@ -94,9 +96,9 @@ export class Router {
 
   handle(req: TsHeaderRequest): string {
     const abs = this.resolveInWorkspace(req.path);
-    const depth: Depth = req.depth ?? "exports";
     const docs: DocsMode = req.docs ?? this.config.docsDefault;
     const maxTokens = req.max_tokens ?? 4000;
+    const includeImports = req.includeImports ?? false;
     const matcher = makeMatcher(req.filter);
     const filterNote = matcher ? `// [filter: "${req.filter}" — matching symbols only]\n` : "";
 
@@ -110,6 +112,8 @@ export class Router {
     if (stat.isDirectory()) {
       return this.directory(abs, maxTokens, matcher, req.filter);
     }
+    // Single-file default: "all" shows non-exported symbols too (more useful for file analysis).
+    const depth: Depth = req.depth ?? "all";
     if (!TS_FILE.test(abs)) {
       return `// ${req.path} is not a TypeScript file. ts_header handles .ts/.tsx; use your normal file-read tool for this one.`;
     }
@@ -125,8 +129,10 @@ export class Router {
     return filterNote + formatFileHeader(model, {
       depth,
       docs,
+      includeImports,
       maxTokens,
       denseGroupMinLines: this.config.denseGroupMinLines,
+      workspaceRoot: this.config.workspaceRoot,
     });
   }
 
@@ -230,6 +236,7 @@ export class Router {
           docs: this.config.docsDefault,
           maxTokens,
           denseGroupMinLines: this.config.denseGroupMinLines,
+          workspaceRoot: this.config.workspaceRoot,
         };
         const header = formatFileHeader(model, opts);
         return `// [filter: "${filterStr}" — matched 1 file; showing full header]\n${header}`;

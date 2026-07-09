@@ -58,6 +58,7 @@ export function extract(input: ExtractInput): FileHeaderModel {
 
   const entries: DeclEntry[] = [];
   const reexports: string[] = [];
+  const imports: string[] = [];
   let statementCount = 0;
   let reexportCount = 0;
 
@@ -72,7 +73,8 @@ export function extract(input: ExtractInput): FileHeaderModel {
     }
     if (ts.isImportDeclaration(stmt) || ts.isImportEqualsDeclaration(stmt)) {
       statementCount--; // imports don't count toward barrel ratio
-      continue;
+      imports.push(stmt.getText(sourceFile).replace(/\s+/g, " ").trim());
+      continue;  
     }
     const extracted = extractStatement(stmt, checker, sourceFile, depth, errors);
     // A promoted file-level doc must not ALSO appear as the first
@@ -101,6 +103,7 @@ export function extract(input: ExtractInput): FileHeaderModel {
     barrel,
     reexports,
     entries,
+    imports,
     fileErrors: errors.unattached,
     skippedRanges: [],
   };

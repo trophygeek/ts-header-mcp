@@ -1,6 +1,6 @@
 # Plan: Batch File Inspection, Import Signatures, Symbol Snippet Previews
 
-Status: PLANNED (not started)
+Status: IN PROGRESS (Feature 2 done, Feature 3 in progress)
 Audience: an implementing agent. Follow the checklist in order; each feature is
 independent but they share doc/test updates, so finish all three before the
 "Documentation" and "Release" sections.
@@ -17,7 +17,7 @@ Rules that constrain this work:
 - All layout decisions live in `formatter.ts`.
 - The cache key in `router.fileModel()` is `contentHash : depth : EXTRACTOR_VERSION`.
   Any change to what the extractor emits REQUIRES bumping `EXTRACTOR_VERSION`
-  (currently `"3"`, in `router.ts`).
+  (currently `"4"`, in `router.ts`).
 
 ---
 
@@ -317,26 +317,26 @@ the existing option descriptions, no more.
 ## Implementation checklist (do in this order)
 
 Preparation
-- [ ] `npm test` passes on a clean checkout (baseline)
+- [x] `npm test` passes on a clean checkout (baseline)
 
 Feature 2 + 3 share the model/extractor version bump — do them before Feature 1
 so the batch code path is built against the final single-file behavior.
 
 Feature 2: includeImports
-- [ ] `model.ts`: `FileHeaderModel.imports`, `HeaderOptions.includeImports` + default
-- [ ] `extractor.ts`: collect collapsed import text
-- [ ] `formatter.ts`: conditional import block + 120-char elision
-- [ ] `router.ts`: thread `includeImports` through `TsHeaderRequest` → `formatFileHeader`
-- [ ] `server.ts` zod schema + description; `cli.ts` `--include-imports`;
+- [x] `model.ts`: `FileHeaderModel.imports`, `HeaderOptions.includeImports` + default
+- [x] `extractor.ts`: collect collapsed import text
+- [x] `formatter.ts`: conditional import block + 120-char elision
+- [x] `router.ts`: thread `includeImports` through `TsHeaderRequest` → `formatFileHeader`
+- [x] `server.ts` zod schema + description; `cli.ts` `--include-imports`;
       `http-server.mjs` passthrough; `mirica-tool/ts_header.js` param + body
-- [ ] Unit tests (extractor + formatter + router option threading)
+- [x] Unit tests (extractor + formatter + router option threading)
 
 Feature 3: snippet preview
 - [ ] `model.ts`: `DeclEntry.snippet`
 - [ ] `extractor.ts`: call-expression/object-literal detection in `variableEntries`
 - [ ] `formatter.ts`: snippet line under signature, brief/full length policy
 - [ ] Extend Convex-shaped fixture + unit tests for all three `docs` modes
-- [ ] Bump `EXTRACTOR_VERSION` to `"4"` in `router.ts` (once, covers 2+3)
+- [x] Bump `EXTRACTOR_VERSION` to `"4"` in `router.ts` (once, covers 2+3)
 
 Feature 1: batch paths
 - [ ] `router.ts`: widen `TsHeaderRequest.path`; extract `fileHeader()` helper;

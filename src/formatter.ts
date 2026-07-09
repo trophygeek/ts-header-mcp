@@ -4,6 +4,7 @@
  * All rendering rules live here; the extractor knows nothing about layout.
  */
 
+import path from "node:path";
 import type {
   DeclEntry,
   FileHeaderModel,
@@ -15,15 +16,39 @@ const ANNOT_COL = 64; // column where trailing "// Lnn" comments aim to start
 const CHARS_PER_TOKEN = 4;
 const FILE_ERROR_BANNER_THRESHOLD = 10;
 
+// ---------------------------------------------------------------------------
+// File URL helpers — clickable markdown links to source locations
+// ---------------------------------------------------------------------------
+
+type LineLinker = (line: number, endLine?: number) => string;
+
+function makeLinker(opts: HeaderOptions, relPath: string): LineLinker | undefined {
+  if (!opts.workspaceRoot) return undefined;
+  const abs = path.resolve(opts.workspaceRoot, relPath);
+  const fileUri = "file://" + abs;
+  return (line, endLine) => {
+    const frag = endLine && endLine !== line ? `#L${line}-L${endLine}` : `#L${line}`;
+    const label = endLine && endLine !== line ? `L${line}-${endLine}` : `L${line}`;
+    return `[${label}](${fileUri}${frag})`;
+  };
+}
+
+function lineRef(linker: LineLinker | undefined, line: number, endLine?: number): string {
+  if (linker) return linker(line, endLine);
+  return endLine && endLine !== line ? `L${line}-${endLine}` : `L${line}`;
+}
+
 export function formatFileHeader(
     model: FileHeaderModel,
     partial?: Partial<HeaderOptions>
 ): string {
   const opts: HeaderOptions = { ...DEFAULT_OPTIONS, ...partial };
   const out: string[] = [];
+  const linker = makeLinker(opts, model.path);
 
+  const pathDisplay = linker && opts.workspaceRoot ? `[${model.path}](file://${path.resolve(opts.workspaceRoot, model.path)})` : model.path;
   out.push(
-      `// ==== ${model.path} — ${model.totalLines} lines, ${model.exportCount} export${model.exportCount === 1 ? "" : "s"} ====`
+      `// ==== ${pathDisplay} — ${model.totalLines} lines, ${model.exportCount} export${model.exportCount === 1 ? "" : "s"} ====`
   );
 
   if (model.fileDoc) {
@@ -35,13 +60,22 @@ export function formatFileHeader(
   }
   out.push("");
 
+  // Optional imports block (after banner/fileDoc, before entries)
+  if (opts.includeImports && model.imports?.length) {
+    out.push("// -- imports --");
+    for (const imp of model.imports) {
+      out.push(elideImport(imp, 120));
+    }
+    out.push("");
+  }
+
   if (model.barrel) {
     out.push(`// barrel file: re-exports ${capList(model.reexports)}`);
     out.push(`// follow: ts_header on those paths for the real declarations`);
     return finish(out, model, opts);
   }
 
-  renderEntries(model.entries, out, opts, 0);
+  renderEntries(model.entries, out, opts, 0, linker);
 
   for (const r of model.skippedRanges) {
     out.push(`// ⚠ L${r.from}-${r.to}: skipped, ${r.message}`);
@@ -64,7 +98,8 @@ function renderEntries(
     entries: DeclEntry[],
     out: string[],
     opts: HeaderOptions,
-    indentLevel: number
+    indentLevel: number,
+    linker?: LineLinker
 ): void {
   const indent = "  ".repeat(indentLevel);
   let i = 0;
@@ -78,7 +113,7 @@ function renderEntries(
       if (sourceSpan > opts.denseGroupMinLines && run.length >= 2) {
         const from = run[0].line;
         const to = run[run.length - 1].endLine;
-        out.push(`${indent}// -- ${denseLabel(run)}: L${from}-${to} --`);
+        out.push(`${indent}// -- ${denseLabel(run)}: ${lineRef(linker, from, to)} --`);
         for (const e of run) {
           renderDoc(e, out, opts, indent, "before");
           out.push(indent + getRenderText(e) + deprecatedMark(e));
@@ -95,7 +130,7 @@ function renderEntries(
         entries[i].kind === "function" &&
         entries[i + 1]?.kind === "function" &&
         entries[i + 1].name === entries[i].name;
-    renderEntry(entries[i], out, opts, indentLevel, isOverloadContinuation);
+    renderEntry(entries[i], out, opts, indentLevel, linker, isOverloadContinuation);
     i++;
   }
 }
@@ -105,6 +140,7 @@ function renderEntry(
     out: string[],
     opts: HeaderOptions,
     indentLevel: number,
+    linker?: LineLinker,
     suppressTrailingBlank = false
 ): void {
   const indent = "  ".repeat(indentLevel);
@@ -117,24 +153,24 @@ function renderEntry(
   const firstLine = indent + text.split("\n")[0] + openBrace;
   const rest = text.split("\n").slice(1).map((l) => indent + l);
 
-  out.push(padAnnotate(firstLine, annotation(e)));
+  out.push(padAnnotate(firstLine, annotation(e, linker)));
   out.push(...rest);
   renderDoc(e, out, opts, indent, "after");
 
   if (hasChildren) {
-    renderEntries(e.children ?? [], out, opts, indentLevel + 1);
+    renderEntries(e.children ?? [], out, opts, indentLevel + 1, linker);
   }
   if (isContainer) out.push(indent + "}");
   if (indentLevel === 0 && !suppressTrailingBlank) out.push("");
 }
 
-function annotation(e: DeclEntry): string {
-  let a = e.line === e.endLine ? `// L${e.line}` : `// L${e.line}-${e.endLine}`;
+function annotation(e: DeclEntry, linker?: LineLinker): string {
+  let a = `// ${lineRef(linker, e.line, e.endLine)}`;
   if (e.doc?.deprecated) {
     a += ` ⚠ deprecated`;
   }
   if (e.error) {
-    const at = e.error.line !== e.line ? `at L${e.error.line} ` : "";
+    const at = e.error.line !== e.line ? `at ${lineRef(linker, e.error.line)} ` : "";
     a += ` ⚠ ${at}TS${e.error.code}: ${e.error.message} — type unreliable`;
   }
   return a;
@@ -342,6 +378,27 @@ function countErrors(model: FileHeaderModel): number {
   };
   walk(model.entries);
   return n;
+}
+
+/**
+ * Elide a long named-import list to fit within `max` characters.
+ * `import { a, b, c, d, e } from "x"` → `import { a, b, … } from "x"` when over cap.
+ */
+function elideImport(imp: string, max: number): string {
+  if (imp.length <= max) return imp;
+  // Match `import { ... } from "..."`  or  `import type { ... } from "..."`
+  const m = imp.match(/^(import\s+(?:type\s+)?)\{([^}]+)\}(\s*from\s*.+)$/);
+  if (!m) {
+    // Can't structurally elide; hard-truncate.
+    return imp.slice(0, max - 1) + "…";
+  }
+  const [, prefix, names, suffix] = m;
+  const items = names.split(",").map((s) => s.trim()).filter(Boolean);
+  for (let keep = items.length - 1; keep >= 1; keep--) {
+    const candidate = `${prefix}{ ${items.slice(0, keep).join(", ")}, … }${suffix}`;
+    if (candidate.length <= max) return candidate;
+  }
+  return `${prefix}{ … }${suffix}`;
 }
 
 function findMatchingBrace(str: string, startIdx: number): number {

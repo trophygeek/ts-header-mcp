@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * ts-header CLI entry point for non-MCP integrations.
- * Usage: ts-header-cli <workspaceRoot> <path> [--depth=exports|all|deep] [--docs=none|brief|full] [--max-tokens=N] [--filter=PATTERN]
+ * Usage: ts-header-cli <workspaceRoot> <path> [--depth=exports|all|deep] [--docs=none|brief|full] [--max-tokens=N] [--filter=PATTERN] [--include-imports]
  *
  * Prints the header text to stdout, errors to stderr.
  * Exit code 0 on success, 1 on error.
@@ -13,7 +13,7 @@ import { Router } from "./router.js";
 function main() {
   const args = process.argv.slice(2);
   if (args.length < 2) {
-    console.error("Usage: ts-header-cli <workspaceRoot> <path> [--depth=exports|all|deep] [--docs=none|brief|full] [--max-tokens=N] [--filter=PATTERN]");
+    console.error("Usage: ts-header-cli <workspaceRoot> <path> [--depth=exports|all|deep] [--docs=none|brief|full] [--max-tokens=N] [--filter=PATTERN] [--include-imports]");
     process.exit(1);
   }
 
@@ -25,6 +25,7 @@ function main() {
   let docs: "none" | "brief" | "full" | undefined;
   let maxTokens: number | undefined;
   let filter: string | undefined;
+  let includeImports = false;
 
   for (let i = 2; i < args.length; i++) {
     const arg = args[i];
@@ -39,6 +40,8 @@ function main() {
       if (!isNaN(val) && val > 0) maxTokens = val;
     } else if (arg.startsWith("--filter=")) {
       filter = arg.slice("--filter=".length);
+    } else if (arg === "--include-imports") {
+      includeImports = true;
     }
   }
 
@@ -51,6 +54,7 @@ function main() {
       docs,
       max_tokens: maxTokens,
       filter,
+      includeImports,
     });
     process.stdout.write(result);
   } catch (err) {

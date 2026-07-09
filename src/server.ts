@@ -58,8 +58,8 @@ server.registerTool(
         .enum(["exports", "all", "deep"])
         .optional()
         .describe(
-          "exports (default): exported declarations only. all: also non-exported and private. " +
-            "deep: also inner functions and classes nested inside function bodies."
+          "exports: exported declarations only (default for directories). all: also non-exported and private (default for files). " +
+            "deep: also inner functions/classes nested in function bodies."
         ),
       docs: z
         .enum(["none", "brief", "full"])
@@ -81,6 +81,10 @@ server.registerTool(
           "Show only symbols whose NAME matches this pattern (regex, case-insensitive; plain text works too). " +
             "Applies at every level — use ts_header(\".\", {filter: \"booking\"}) to find booking-related symbols across the project."
         ),
+      includeImports: z
+        .boolean()
+        .optional()
+        .describe("When true, include the file's import statements in the header output. Default false."),
     },
   },
   async (args) => {
@@ -149,6 +153,7 @@ server.registerTool(
         docs: args.docs,
         max_tokens: args.max_tokens,
         filter: args.filter,
+        includeImports: args.includeImports,
       });
       return { content: [{ type: "text", text }] };
     } catch (err) {

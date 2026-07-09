@@ -50,6 +50,8 @@ export interface DeclEntry {
   error?: ErrorMark;
   /** Class/interface/namespace members, or inner functions at depth:"deep". */
   children?: DeclEntry[];
+  /** Collapsed source text of the args/handler shape for framework-wrapper consts (e.g. Convex). */
+  snippet?: string;
 }
 
 export interface FileHeaderModel {
@@ -64,6 +66,8 @@ export interface FileHeaderModel {
   /** Module specifiers re-exported from, when barrel. */
   reexports: string[];
   entries: DeclEntry[];
+  /** Collapsed import statements (always extracted; formatter decides visibility). */
+  imports: string[];
   /** Diagnostics that could not be attached to a specific declaration. */
   fileErrors: ErrorMark[];
   /** Ranges the parser could not recover (rare). */
@@ -76,15 +80,20 @@ export type DocsMode = "none" | "brief" | "full";
 export interface HeaderOptions {
   depth: Depth;
   docs: DocsMode;
+  /** When true, render the file's import statements in the header output. */
+  includeImports: boolean;
   /** Approximate output budget in tokens (est. 4 chars/token). */
   maxTokens: number;
   /** Dense-block grouping threshold in rendered lines (design doc §5.3, default 6). */
   denseGroupMinLines: number;
+  /** Absolute workspace root; when set, annotations become clickable file:// URLs. */
+  workspaceRoot?: string;
 }
 
 export const DEFAULT_OPTIONS: HeaderOptions = {
   depth: "exports",
   docs: "brief",
+  includeImports: false,
   maxTokens: 4000,
   denseGroupMinLines: 6,
 };

@@ -257,3 +257,38 @@ describe("barrel detection", () => {
     assert.deepEqual(model.reexports, ["./a.js", "./b.js"]);
   });
 });
+
+describe("import extraction", () => {
+  it("collects named, type-only, and namespace import styles as collapsed text", () => {
+    const m = extractVirtual(`
+import { mutation, query } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import * as bookings from "@roar/domain";
+
+export const x = 1;
+`);
+    assert.equal(m.imports.length, 3);
+    assert.equal(m.imports[0], 'import { mutation, query } from "./_generated/server";');
+    assert.equal(m.imports[1], 'import type { Doc } from "./_generated/dataModel";');
+    assert.equal(m.imports[2], 'import * as bookings from "@roar/domain";');
+  });
+
+  it("collapses multi-line imports to a single line", () => {
+    const m = extractVirtual(`
+import {
+  a,
+  b,
+  c,
+} from "./module";
+
+export const x = 1;
+`);
+    assert.equal(m.imports.length, 1);
+    assert.equal(m.imports[0], 'import { a, b, c, } from "./module";');
+  });
+
+  it("produces an empty imports array when there are no imports", () => {
+    const m = extractVirtual(`export const x = 1;\n`);
+    assert.deepEqual(m.imports, []);
+  });
+});

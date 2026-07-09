@@ -18,10 +18,11 @@ const MCP_TOOLS = {
             properties: {
                 workspace: { type: "string", description: "Absolute path to the TypeScript project root to serve (e.g. the current workspace root)." },
                 path: { type: "string", description: "File or directory path relative to the workspace. '.' for the project overview." },
-                depth: { type: "string", description: "exports (default): exported declarations only. all: also non-exported and private. deep: also inner functions/classes nested in function bodies." },
+                depth: { type: "string", description: "exports: exported declarations only (default for directories). all: also non-exported and private (default for files). deep: also inner functions/classes nested in function bodies." },
                 docs: { type: "string", description: "none: signatures only. brief (default): one-sentence doc summaries. full: complete JSDoc including @param/@throws." },
                 max_tokens: { type: "integer", description: "Approximate output budget. Default 4000. Raise if output was truncated." },
-                filter: { type: "string", description: "Show only symbols whose NAME matches this pattern (case-insensitive regex; plain text works too). With path '.', acts as a project-wide typed symbol search." }
+                filter: { type: "string", description: "Show only symbols whose NAME matches this pattern (case-insensitive regex; plain text works too). With path '.', acts as a project-wide typed symbol search." },
+                includeImports: { type: "boolean", description: "When true, include the file's import statements in the header output. Default false." }
             },
             required: ["workspace", "path"]
         }
@@ -51,7 +52,8 @@ function view(params) {
                 depth: params.depth,
                 docs: params.docs,
                 max_tokens: params.max_tokens,
-                filter: params.filter
+                filter: params.filter,
+                includeImports: params.includeImports
             },
             contentType: "application/json"
         });

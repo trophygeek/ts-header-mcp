@@ -56,6 +56,8 @@ export class UserService {
   getUser(id: string) { return { id, name: "x" }; }
 }
 export function createUserService() { return new UserService(); }
+/** Internal helper, not exported. */
+function slugify(s: string): string { return s.toLowerCase().replace(/\\s+/g, "-"); }
 `
   );
   write(
@@ -95,13 +97,23 @@ describe("navigation levels", () => {
   it("directory of files returns per-file export lists", () => {
     const out = router.handle({ path: "src/services" });
     assert.match(out, /userService\.ts.*UserService, createUserService/);
+    assert.ok(!out.includes("slugify"), "non-exported symbols stay out of directory listings");
   });
 
-  it("file path returns a full header with line annotations and docs", () => {
+  it("file path defaults to depth:all, showing non-exported symbols", () => {
     const out = router.handle({ path: "src/services/userService.ts" });
     assert.match(out, /getUser\(id: string\): \{ id: string; name: string; \}/);
-    assert.match(out, /\/\/ L\d/);
+    assert.match(out, /\/\/ \[?L\d/);
     assert.ok(out.includes("// Fetch by id."));
+    // Non-exported helper visible at default depth ("all")
+    assert.ok(out.includes("slugify"), "non-exported slugify should appear at default depth");
+    assert.ok(out.includes("Internal helper"), "its doc should appear too");
+  });
+
+  it("file path with explicit depth:exports hides non-exported symbols", () => {
+    const out = router.handle({ path: "src/services/userService.ts", depth: "exports" });
+    assert.ok(out.includes("createUserService"), "exported symbol present");
+    assert.ok(!out.includes("slugify"), "non-exported slugify hidden at depth:exports");
   });
 });
 
@@ -160,7 +172,7 @@ describe("filter parameter", () => {
     const out = router.handle({ path: ".", filter: "User" });
     assert.match(out, /src\/models\/adminUser\.ts\s+2L\s+User/);
     assert.match(out, /src\/models\/user\.ts\s+2L\s+User/);
-    assert.match(out, /src\/services\/userService\.ts\s+7L\s+UserService, createUserService/);
+    assert.match(out, /src\/services\/userService\.ts\s+9L\s+UserService, createUserService/);
   });
 
   it("promotes to full header when a filtered request resolves to exactly one matching file", () => {
@@ -212,5 +224,29 @@ describe("temp-file policy", () => {
     router.handle({ path: "src/services" });
     router.handle({ path: "src/services/userService.ts", depth: "deep", docs: "full" });
     assert.equal(snapshotWorkspace(), before_snapshot);
+  });
+});
+
+describe("includeImports option", () => {
+  it("shows imports block when includeImports is true on a file with imports", () => {
+    write(
+      "src/services/importTest.ts",
+      `import { UserService } from "./userService.js";\nimport type { TokenPair } from "./authService.js";\n\nexport function create() { return new UserService(); }\n`
+    );
+    const out = router.handle({ path: "src/services/importTest.ts", includeImports: true });
+    assert.ok(out.includes("// -- imports --"), "imports block present");
+    assert.ok(out.includes('import { UserService } from "./userService.js";'));
+    assert.ok(out.includes('import type { TokenPair } from "./authService.js";'));
+    fs.rmSync(path.join(ws, "src/services/importTest.ts"));
+  });
+
+  it("omits imports block when includeImports is not set (default false)", () => {
+    write(
+      "src/services/importTest2.ts",
+      `import { UserService } from "./userService.js";\n\nexport function create() { return new UserService(); }\n`
+    );
+    const out = router.handle({ path: "src/services/importTest2.ts" });
+    assert.ok(!out.includes("-- imports --"), "no imports block by default");
+    fs.rmSync(path.join(ws, "src/services/importTest2.ts"));
   });
 });

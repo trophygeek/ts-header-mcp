@@ -6,7 +6,7 @@
  *
  * Usage: node http-server.mjs [port]           (default 7461)
  *
- * POST /ts-header  { workspace, path, depth?, docs?, max_tokens?, filter? }
+ * POST /ts-header  { workspace, path, depth?, docs?, max_tokens?, filter?, includeImports? }
  *   -> { ok: true, text: "...header..." }  or  { ok: false, error: "..." }
  * GET  /health     -> { ok: true, name: "ts-header-http" }
  *
@@ -60,6 +60,7 @@ const server = http.createServer((req, res) => {
         docs: body.docs,
         max_tokens: body.max_tokens,
         filter: body.filter,
+        includeImports: body.includeImports,
       });
       send(200, { ok: true, text });
     } catch (err) {
