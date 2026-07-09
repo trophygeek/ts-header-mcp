@@ -50,6 +50,17 @@ One tool, `ts_header(path, depth?, docs?, max_tokens?, filter?)`. Navigation dep
 
 For framework-wrapper declarations like Convex's `export const f = mutation({ args: {...}, handler: ... })`, the header adds a `// args:` line under the signature showing the validator shape as written (or the handler's parameter list when there is no `args` property). The line is suppressed when it would only restate the property names already visible in the checked signature; when too long, whole properties are elided with `…n more` rather than cut mid-identifier.
 
+### Visual Comparison: ts-header vs. Alternatives
+
+| Capabilities | ts-header | LSP Servers | Repo Maps (Aider) | tsc --emitDeclaration |
+| :--- | :---: | :---: | :---: | :---: |
+| **Retains Line Numbers** | **Yes (Lnn)** | Yes (symbol) | No | No |
+| **Token Budget Aware** | **Yes** | No | **Yes** | No |
+| **Works on Uncompilable Code** | **Yes** | Yes | Yes | No |
+| **One-Shot Project Navigation**| **Yes** | No (Multi-step) | **Yes** (Lossy) | No |
+| **Includes Private/Local Symbols**| **Optional** | Yes | No | No |
+
+
 ## Install
 
 Requires Node 20+.
@@ -142,11 +153,15 @@ verify each one before moving to the next. Do not skip the test step.
 SOURCE: https://github.com/<your-username>/ts-header-mcp.git
 WORKSPACE IT WILL SERVE: <PATH_TO_MY_TS_PROJECT>
 
-1. INSTALL LOCATION — outside any git repo I work in:
+1. PRE-FLIGHT CHECK:
+   Run `node -v` to ensure my environment has Node.js version 20 or higher.
+   If the version is lower, stop immediately and explain that Node 20+ is required.
+
+2. INSTALL LOCATION — outside any git repo I work in:
    git clone the SOURCE into ~/tools/ts-header. Never copy it into my current
    workspace; nothing from this setup may be committed to any of my repositories.
 
-2. BUILD AND TEST:
+3. BUILD AND TEST:
    cd ~/tools/ts-header
    npm install
    npm test                      # unit suite — must end with "fail 0"
@@ -154,7 +169,7 @@ WORKSPACE IT WILL SERVE: <PATH_TO_MY_TS_PROJECT>
    If a test fails, stop and show me the full output. Do not modify the source
    to make tests pass without telling me what you changed and why.
 
-3. REGISTER THE SERVER:
+4. REGISTER THE SERVER:
    Find my MCP config: ~/.gemini/config/mcp_config.json on current Antigravity
    versions (older installs used ~/.gemini/antigravity/mcp_config.json — use
    whichever exists; if both exist, use the one the IDE opens via the agent
@@ -171,19 +186,19 @@ WORKSPACE IT WILL SERVE: <PATH_TO_MY_TS_PROJECT>
 
    Use real absolute paths (no ~ inside the JSON).
 
-4. ACTIVATE AND VERIFY:
+5. ACTIVATE AND VERIFY:
    Refresh MCP servers (Settings > Customizations > Installed MCP Servers >
    Refresh, or restart the IDE). Confirm "ts-header" appears with one tool,
    ts_header. If the server fails to start, run
    node ~/tools/ts-header/dist/server.js <WORKSPACE> manually, capture stderr,
    and show it to me before changing anything.
 
-5. SMOKE-TEST THE TOOL by calling it three times and showing me each output:
+6. SMOKE-TEST THE TOOL by calling it three times and showing me each output:
    ts_header(".")                             -> project overview
    ts_header("<some src directory>")          -> per-file export list
    ts_header("<one .ts file from that list>") -> signatures with // L45 numbers
 
-6. FROM NOW ON, in this workspace: when you need to understand TypeScript code,
+7. FROM NOW ON, in this workspace: when you need to understand TypeScript code,
    call ts_header on the directory or file FIRST, and only open source files at
    the specific line numbers it reports. Do not read whole .ts files for
    orientation. Add this rule to your project rules/memory if you support that.

@@ -328,6 +328,14 @@ describe("directory TOCs", () => {
     assert.match(out, /a\.test\.ts \[test\]/);
   });
 
+  it("drill-down hint also spells out the glob batch call", () => {
+    const out = formatFileToc("src", [file({ fileName: "a.ts" }), file({ fileName: "b.ts" })]);
+    assert.ok(
+      out.includes('— or all at once: ts_header("src/*.ts")'),
+      `glob hint present:\n${out}`
+    );
+  });
+
   it("caps export name lists with a +n more suffix (file rows cap at 24)", () => {
     const names = Array.from({ length: 30 }, (_, i) => `export${i}`);
     const out = formatFileToc("src", [file({ fileName: "big.ts", exportNames: names })]);
@@ -472,25 +480,25 @@ describe("snippet preview", () => {
       snippet,
     });
 
-  it("renders snippet line in brief mode, capped at 120 chars", () => {
+  it("renders snippet line in brief mode, capped at 240 chars", () => {
     const out = formatFileHeader(model([withSnippet('args: { id: "x" }')]), { docs: "brief" });
     assert.ok(out.includes('// args: { id: "x" }'), "snippet line present");
     // snippet should appear after the signature line
     assert.ok(out.indexOf("createBooking") < out.indexOf('args: { id: "x" }'));
   });
 
-  it("elides a long snippet to <= 120 chars in brief mode without a mid-token cut", () => {
-    const long = "args: { " + "x".repeat(200) + " }";
+  it("elides a long snippet to <= 240 chars in brief mode without a mid-token cut", () => {
+    const long = "args: { " + "x".repeat(400) + " }";
     const out = formatFileHeader(model([withSnippet(long)]), { docs: "brief" });
     const snippetLine = out.split("\n").find((l) => l.includes("// args:"));
     assert.ok(snippetLine, "snippet line present");
-    // "    // " prefix is 7 chars, snippet capped at 120 → total ≤ 127
+    // "    // " prefix is 7 chars, snippet capped at 240 → total ≤ 247
     const text = snippetLine!.trimStart().replace(/^\/\/ /, "");
-    assert.ok(text.length <= 121, `snippet text is ${text.length} chars, expected <= 121`);
+    assert.ok(text.length <= 241, `snippet text is ${text.length} chars, expected <= 241`);
     assert.ok(text.endsWith("…") || / …\d* ?more?\s*\}?$/.test(text) || /…\d+ more/.test(text), `elision marker present: ${text}`);
   });
 
-  it("renders full snippet in full mode (no 120-char cap)", () => {
+  it("renders full snippet in full mode (no length cap)", () => {
     const long = "args: { " + "field".repeat(30) + " }";
     const out = formatFileHeader(model([withSnippet(long)]), { docs: "full" });
     // In full mode the snippet can be longer than 120 chars across continuation lines
@@ -590,6 +598,23 @@ describe("args-line gating", () => {
     assert.ok(out.includes("// args:"), "args line kept — extraFlag not in signature");
   });
 
+  it("rewrites the args line to show ONLY props the elided signature hides (complementary, not duplicative)", () => {
+    const e = entry({
+      kind: "const",
+      name: "createBooking",
+      text: "export const createBooking: Registered<{profileId: string; spotId: string; idempotencyKey: string; …2 more}, Promise<void>>",
+      line: 10,
+      endLine: 60,
+      snippet: 'args: { profileId: v.id(), spotId: v.string(), idempotencyKey: v.string(), hiddenFieldAlpha: v.number(), hiddenFieldBeta: v.string() }',
+    });
+    const out = formatFileHeader(model([e]), { docs: "brief" });
+    const line = out.split("\n").find((l) => l.includes("// args:"));
+    assert.ok(line, "args line present");
+    assert.ok(line!.includes("…also"), `complementary marker present: ${line}`);
+    assert.ok(line!.includes("hiddenFieldAlpha") && line!.includes("hiddenFieldBeta"), "hidden props surfaced");
+    assert.ok(!line!.includes("profileId"), `visible props not repeated: ${line}`);
+  });
+
   it("never truncates an args line mid-identifier; elides whole properties with …n more", () => {
     const props = Array.from({ length: 10 }, (_, i) => `anExtremelyLongIdentifierNumber${i}: v.string()`);
     const e = entry({
@@ -634,5 +659,21 @@ describe("batch hint after multi-file filter results", () => {
   it("emits no batch hint for a single match", () => {
     const out = formatRecursiveFileList("src", [mf("src/only.ts")]);
     assert.ok(!out.includes("full headers for all matches"));
+  });
+});
+describe("hidden-count footer on non-empty headers", () => {
+  it("appends a hidden-declarations footer when entries exist alongside hidden ones", () => {
+    const e = entry({ name: "f", text: "export function f(): void", line: 3, endLine: 3 });
+    const out = formatFileHeader(model([e], { hiddenDeclCount: 14 }), { depth: "exports" });
+    assert.match(out, /\/\/ \+14 non-exported declarations hidden — depth:"all" to include/);
+    // Still a normal header: entry and the details hint both present
+    assert.ok(out.includes("export function f(): void"));
+    assert.ok(out.includes("L-numbers above"));
+  });
+
+  it("emits no footer when nothing is hidden", () => {
+    const e = entry({ name: "f", text: "export function f(): void", line: 3, endLine: 3 });
+    const out = formatFileHeader(model([e], { hiddenDeclCount: 0 }));
+    assert.ok(!out.includes("hidden"), "no hidden footer");
   });
 });

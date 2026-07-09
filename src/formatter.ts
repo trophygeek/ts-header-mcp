@@ -1,3 +1,5 @@
+const SNIPPET_MAX = 240; // brief-mode snippet length cap (chars)
+
 /**
  * Formatter: FileHeaderModel -> header text (design doc §5) and
  * directory models -> TOC text (design doc §6).
@@ -68,6 +70,11 @@ export function formatFileHeader(
       out.push("// no extractable declarations — read the file directly");
     }
     return truncateToBudget(out, opts).join("\n");
+  }
+
+  const hidden = model.hiddenDeclCount ?? 0;
+  if (hidden > 0) {
+    out.push(`// +${hidden} non-exported declaration${hidden === 1 ? "" : "s"} hidden — depth:"all" to include`);
   }
   return finish(out, model, opts);
 }
@@ -203,10 +210,10 @@ function renderSnippet(
     indent: string,
 ): void {
   if (opts.docs === "none" || !e.snippet) return;
-  if (snippetIsRedundant(e)) return;
-  let text = e.snippet;
+  let text = effectiveSnippet(e);
+  if (text === null) return;
   if (opts.docs === "brief") {
-    if (text.length > 120) text = elideSnippetWholeProps(text, 120);
+    if (text.length > SNIPPET_MAX) text = elideSnippetWholeProps(text, SNIPPET_MAX);
     out.push(indent + "    // " + text);
   } else {
     // full mode: wrap at ~110 chars per continuation line
@@ -222,20 +229,31 @@ function renderSnippet(
 /**
  * An "args:" snippet is redundant when every property NAME it shows is
  * already visible in the rendered signature — same names, nothing new.
- * It is kept when the rendered signature elided properties ("…n more") or
- * when the snippet names differ from what the signature shows.
+ * When the rendered signature elided properties ("…n more"), the snippet is
+ * rewritten to show ONLY the properties the signature does not show
+ * ("args: { …also x: 0, y: \"\" }") — complementary, never duplicative.
+ * Returns the snippet text to render, or null to suppress it.
  */
-function snippetIsRedundant(e: DeclEntry): boolean {
-  if (!e.snippet || !e.snippet.startsWith("args:")) return false;
+function effectiveSnippet(e: DeclEntry): string | null {
+  if (!e.snippet) return null;
+  if (!e.snippet.startsWith("args:")) return e.snippet;
   const rendered = getRenderText(e);
-  if (rendered.includes("…")) return false; // signature elided — snippet adds info
-  const snippetNames = topLevelPropNames(e.snippet.replace(/^args:\s*/, ""));
-  if (snippetNames.length === 0) return false;
+  const objText = e.snippet.replace(/^args:\s*/, "").trim();
+  const snippetNames = topLevelPropNames(objText);
+  if (snippetNames.length === 0) return e.snippet;
   // Property names visible anywhere in the rendered signature.
   const renderedNames = new Set(
       [...rendered.matchAll(/([A-Za-z_$][\w$]*)\??:/g)].map((m) => m[1])
   );
-  return snippetNames.every((n) => renderedNames.has(n));
+  const props = splitProperties(objText.slice(1, -1));
+  const hidden = props.filter((p) => {
+    const name = propName(p);
+    return name !== undefined && !renderedNames.has(name);
+  });
+  if (hidden.length === 0) return null; // every name already visible — pure repetition
+  if (hidden.length === props.length) return e.snippet; // nothing overlaps — show as written
+  // Partial overlap: show only what the signature does not.
+  return `args: { …also ${hidden.join(", ")} }`;
 }
 
 /** Top-level property names of an object-literal-ish string `{ a: 1, b: 2 }`. */
@@ -243,9 +261,14 @@ function topLevelPropNames(objText: string): string[] {
   const t = objText.trim();
   if (!t.startsWith("{") || !t.endsWith("}")) return [];
   return splitProperties(t.slice(1, -1))
-      .map((p) => p.match(/^([A-Za-z_$][\w$]*|"[^"]*"|'[^']*')\s*[?]?\s*:/)?.[1])
+      .map(propName)
       .filter((n): n is string => !!n)
-      .map((n) => n.replace(/^["']|["']$/g, ""));
+}
+
+/** Name of a single `name: value` property text, quotes stripped. */
+function propName(propText: string): string | undefined {
+  const raw = propText.match(/^([A-Za-z_$][\w$]*|"[^"]*"|'[^']*')\s*[?]?\s*:/)?.[1];
+  return raw?.replace(/^["']|["']$/g, "");
 }
 
 /**
@@ -380,7 +403,7 @@ export function formatFileToc(dirPath: string, files: DirFileSummary[]): string 
   const example = files.find((f) => !f.barrel && !f.isTest) ?? files[0];
   if (example) {
     out.push("");
-    out.push(`// drill down: ts_header("${dirPath}/${example.fileName}")`);
+    out.push(`// drill down: ts_header("${dirPath}/${example.fileName}") — or all at once: ts_header("${dirPath}/*.ts")`);
   }
   return out.join("\n");
 }
