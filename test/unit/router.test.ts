@@ -100,14 +100,19 @@ describe("navigation levels", () => {
     assert.ok(!out.includes("slugify"), "non-exported symbols stay out of directory listings");
   });
 
-  it("file path defaults to depth:all, showing non-exported symbols", () => {
+  it("file path defaults to depth:exports, hiding non-exported symbols", () => {
     const out = router.handle({ path: "src/services/userService.ts" });
     assert.match(out, /getUser\(id: string\): \{ id: string; name: string; \}/);
     assert.match(out, /\/\/ \[?L\d/);
     assert.ok(out.includes("// Fetch by id."));
-    // Non-exported helper visible at default depth ("all")
-    assert.ok(out.includes("slugify"), "non-exported slugify should appear at default depth");
-    assert.ok(out.includes("Internal helper"), "its doc should appear too");
+    // Non-exported helper hidden at default depth ("exports")
+    assert.ok(!out.includes("slugify"), "non-exported slugify hidden at default depth");
+  });
+
+  it("file path with explicit depth:all shows non-exported symbols", () => {
+    const out = router.handle({ path: "src/services/userService.ts", depth: "all" });
+    assert.ok(out.includes("slugify"), "non-exported slugify appears at depth:all");
+    assert.ok(out.includes("Internal helper"), "its doc appears too");
   });
 
   it("file path with explicit depth:exports hides non-exported symbols", () => {
@@ -248,5 +253,70 @@ describe("includeImports option", () => {
     const out = router.handle({ path: "src/services/importTest2.ts" });
     assert.ok(!out.includes("-- imports --"), "no imports block by default");
     fs.rmSync(path.join(ws, "src/services/importTest2.ts"));
+  });
+});
+describe("batch file inspection", () => {
+  it("array of 2 files → both headers present, in order, separated by blank line", () => {
+    const out = router.handle({ path: ["src/services/userService.ts", "src/services/authService.ts"] });
+    assert.ok(out.includes("userService.ts"), "first file present");
+    assert.ok(out.includes("authService.ts"), "second file present");
+    // userService should come before authService
+    assert.ok(out.indexOf("userService.ts") < out.indexOf("authService.ts"), "order preserved");
+    // Separated by blank line (\n\n between the two headers)
+    const first = out.indexOf("userService.ts");
+    const second = out.indexOf("authService.ts");
+    const between = out.slice(first, second);
+    assert.ok(between.includes("\n\n"), "blank-line separator between headers");
+  });
+
+  it("glob src/**/*.ts matches nested files, skips .d.ts and node_modules", () => {
+    // Write a .d.ts that should be excluded
+    write("src/types.d.ts", "export type X = string;\n");
+    const out = router.handle({ path: "src/services/*.ts" });
+    assert.ok(out.includes("userService.ts"), "userService matched");
+    assert.ok(out.includes("authService.ts"), "authService matched");
+    assert.ok(!out.includes("types.d.ts"), ".d.ts excluded");
+    fs.rmSync(path.join(ws, "src/types.d.ts"));
+  });
+
+  it("array with one missing file → other file still rendered + not-found line", () => {
+    const out = router.handle({ path: ["src/services/userService.ts", "src/nope.ts"] });
+    assert.ok(out.includes("userService.ts"), "existing file rendered");
+    assert.ok(out.includes("not found: src/nope.ts"), "not-found note present");
+  });
+
+  it("duplicate resolution (file listed twice) → rendered once", () => {
+    const out = router.handle({ path: ["src/services/userService.ts", "src/services/userService.ts"] });
+    // The banner line with the path should appear exactly once (may be a markdown link)
+    const banners = out.split("\n").filter((l) => /==== .*userService\.ts/.test(l));
+    assert.equal(banners.length, 1, "deduplicated to single header");
+  });
+
+  it(">20 files → refusal message, no headers", () => {
+    // Create 21 tiny files
+    for (let i = 0; i < 21; i++) write(`src/gen/f${i}.ts`, `export const x${i} = ${i};\n`);
+    const paths = Array.from({ length: 21 }, (_, i) => `src/gen/f${i}.ts`);
+    const out = router.handle({ path: paths });
+    assert.match(out, /batch too large \(21 files\)/);
+    assert.ok(!out.includes("===="), "no file headers rendered");
+    // Cleanup
+    fs.rmSync(path.join(ws, "src/gen"), { recursive: true, force: true });
+  });
+
+  it("directory in array → per-item rejection message", () => {
+    const out = router.handle({ path: ["src/services", "src/services/userService.ts"] });
+    assert.ok(out.includes("src/services is a directory"), "directory rejection note");
+    assert.ok(out.includes("userService.ts"), "file still rendered");
+  });
+
+  it("filter applies inside batch items", () => {
+    const out = router.handle({
+      path: ["src/services/userService.ts", "src/services/authService.ts"],
+      filter: "getUser",
+    });
+    assert.ok(out.includes("getUser"), "matching symbol present");
+    assert.ok(!out.includes("createUserService"), "non-matching symbol filtered out from first file");
+    // authService has no getUser → should show no-symbols message
+    assert.ok(out.includes("no symbols matching"), "no-match note for second file");
   });
 });

@@ -39,13 +39,16 @@ What ts-header does that the above do not, in combination:
 
 ## The tool
 
-One tool, `ts_header(path, depth?, docs?, max_tokens?)`. Navigation depth is expressed by the path, so the interaction model is the familiar `ls` / `cat` pattern rather than a set of tools to choose between.
+One tool, `ts_header(path, depth?, docs?, max_tokens?, filter?)`. Navigation depth is expressed by the path, so the interaction model is the familiar `ls` / `cat` pattern rather than a set of tools to choose between.
 
-- `path` — file or directory, relative to the workspace. A directory of directories returns a project overview; a directory of files returns a per-file export list (with barrel-file detection and `[test]` tagging); a file returns the full header. `"."` gives the project overview.
+- `path` — file or directory, relative to the workspace. A directory of directories returns a project overview; a directory of files returns a per-file export list (with barrel-file detection and `[test]` tagging); a file returns the full header. `"."` gives the project overview. Also accepts an array of file paths or a glob pattern (`"src/**/*.ts"`) for batch multi-file headers in one call, capped at 20 files; the token budget is split across the batch, and per-item problems (missing file, directory, non-TS) are reported inline without failing the rest.
 - `depth` — `exports` (default) | `all` (adds non-exported declarations and private members) | `deep` (also descends into function bodies: inner functions, closures, locally declared classes).
 - `docs` — `none` | `brief` (default: first JSDoc sentence; shown after single-line signatures, before multi-line declarations) | `full` (complete JSDoc including `@param` and `@throws`). `@deprecated` is always shown regardless of mode. A JSDoc block at the very top of a file is treated as the file's description rather than the first declaration's: it renders under the header banner and as a short annotation on the file's row in directory listings.
 - `max_tokens` — approximate output budget, default 4000. Truncated output says so and how to request more.
 - `filter` — show only symbols whose name matches a pattern (case-insensitive regex; plain text works too). Applies at every level, so `ts_header(".", {filter: "booking"})` acts as a lightweight typed symbol search across the project. Filters names only; full-text search inside function bodies remains grep's job.
+- `includeImports` — when true, the header opens with a `// -- imports --` block listing the file's import statements, collapsed to one line each and elided to 120 characters. Off by default (imports rarely earn their tokens for orientation).
+
+For framework-wrapper declarations like Convex's `export const f = mutation({ args: {...}, handler: ... })`, the header adds a `// args:` line under the signature showing the validator shape as written (or the handler's parameter list when there is no `args` property). The line is suppressed when it would only restate the property names already visible in the checked signature; when too long, whole properties are elided with `…n more` rather than cut mid-identifier.
 
 ## Install
 

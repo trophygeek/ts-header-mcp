@@ -292,3 +292,103 @@ export const x = 1;
     assert.deepEqual(m.imports, []);
   });
 });
+describe("snippet extraction", () => {
+  it("extracts args snippet from the existing Convex-shaped fixture", () => {
+    const e = byName(models.exports, "createBooking")[0];
+    assert.ok(e.snippet, "snippet should be present");
+    assert.match(e.snippet!, /^args: \{/);
+    assert.ok(e.snippet!.includes("profileId"), "includes profileId field");
+    assert.ok(e.snippet!.includes("spotId"), "includes spotId field");
+  });
+
+  it("extracts args snippet from a virtual call-expression const", () => {
+    const m = extractVirtual(`
+function fakeMutation(d: any) { return d; }
+export const m = fakeMutation({ args: { id: "x" }, handler: async (ctx: any, a: any) => {} });
+`);
+    const e = m.entries.find((x) => x.name === "m")!;
+    assert.ok(e.snippet, "snippet should be present");
+    assert.equal(e.snippet, 'args: { id: "x" }');
+  });
+
+  it("falls back to handler parameter list when no args property", () => {
+    const m = extractVirtual(`
+function fakeMutation(d: any) { return d; }
+export const m = fakeMutation({ handler: async (ctx: any, { offerId }: any) => {} });
+`);
+    const e = m.entries.find((x) => x.name === "m")!;
+    assert.ok(e.snippet, "snippet should be present");
+    assert.match(e.snippet!, /^handler\(/);
+    assert.ok(e.snippet!.includes("offerId"), "includes destructured param");
+  });
+
+  it("produces no snippet for a plain const", () => {
+    const e = byName(models.exports, "MAX_PAGE_SIZE")[0];
+    assert.equal(e.snippet, undefined);
+  });
+
+  it("produces no snippet for arrow-function consts (they have full signatures)", () => {
+    const e = byName(models.exports, "chunk")[0];
+    assert.equal(e.snippet, undefined);
+  });
+});
+describe("default exports (Convex schema regression)", () => {
+  const schemaFixture = path.resolve(here, "../fixtures/convexSchema.ts");
+  let schemaModel: FileHeaderModel;
+  let schemaLines: string[];
+
+  before(() => {
+    const src = fs.readFileSync(schemaFixture, "utf8");
+    schemaModel = extractVirtual(src);
+    schemaLines = src.split("\n");
+  });
+
+  const schemaLineOf = (needle: string) =>
+    schemaLines.findIndex((l) => l.includes(needle)) + 1;
+
+  it("surfaces export default <call> as an exported declaration with its full range", () => {
+    const e = schemaModel.entries.find((x) => x.isDefault)!;
+    assert.ok(e, "default export entry present");
+    assert.equal(e.exported, true);
+    assert.equal(e.text, "export default defineSchema({...})");
+    assert.equal(e.line, schemaLineOf("export default defineSchema({"));
+    assert.equal(e.endLine, schemaLines.findIndex((l) => l.startsWith("});")) + 1);
+    assert.ok(schemaModel.exportCount >= 1, "counted as an export");
+  });
+
+  it("renders top-level object keys as children with correct line numbers", () => {
+    const e = schemaModel.entries.find((x) => x.isDefault)!;
+    assert.ok(e.children, "children present");
+    assert.deepEqual(e.children!.map((c) => c.name), ["bookings", "schedules", "profiles"]);
+    assert.equal(e.children![0].line, schemaLineOf("bookings: defineTable"));
+    assert.equal(e.children![1].line, schemaLineOf("schedules: defineTable"));
+    assert.equal(e.children![2].line, schemaLineOf("profiles: defineTable"));
+  });
+
+  it("handles a non-call default export as a collapsed expression", () => {
+    const m = extractVirtual("const x = { a: 1 };\nexport default x;\n");
+    const e = m.entries.find((v) => v.isDefault)!;
+    assert.equal(e.text, "export default x");
+    assert.equal(e.children, undefined);
+  });
+});
+
+describe("brief doc word-boundary cap", () => {
+  it("elides an over-cap brief at a word boundary, never mid-word", () => {
+    const longDoc = "This sentence keeps going with many words " + "repeatedly ".repeat(10) + "until it exceeds the hundred character brief cap easily.";
+    const m = extractVirtual(`/** ${longDoc} */\nexport function f(): void {}\n`);
+    const brief = m.entries[0].doc?.brief;
+    assert.ok(brief, "brief present");
+    assert.ok(brief!.length <= 100, `brief is ${brief!.length} chars`);
+    assert.ok(brief!.endsWith("…"), "ends with ellipsis");
+    assert.match(brief!, /^This sentence keeps going/);
+    // The char before the ellipsis must complete a whole word from the source
+    const lastWord = brief!.slice(0, -1).split(" ").pop()!;
+    assert.ok(longDoc.split(" ").includes(lastWord), `"${lastWord}" is a complete source word`);
+  });
+
+  it("leaves short briefs untouched", () => {
+    const m = extractVirtual(`/** Short and sweet. */\nexport function f(): void {}\n`);
+    assert.equal(m.entries[0].doc?.brief, "Short and sweet.");
+  });
+});

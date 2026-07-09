@@ -32,8 +32,11 @@ const TS_FILE = /\.(ts|tsx|mts|cts)$/;
 const DTS_FILE = /\.d\.(ts|mts|cts)$/;
 const TEST_FILE = /(\.(test|spec)\.(ts|tsx|mts|cts)$)|(^|\/)__tests__\//;
 
+const GLOB_CHARS = /[*?[]/;
+const BATCH_FILE_CAP = 20;
+
 export interface TsHeaderRequest {
-  path: string;
+  path: string | string[];
   depth?: Depth;
   docs?: DocsMode;
   max_tokens?: number;
@@ -78,6 +81,26 @@ interface DeclEntryLike {
   [k: string]: unknown;
 }
 
+/**
+ * Convert a minimal glob pattern to a RegExp. Supports:
+ *   `**` → match any path segments (including none)
+ *   `*`  → match within a single segment (no `/`)
+ *   `?`  → single char (no `/`)
+ * All other regex-special chars are escaped.
+ */
+function globToRegex(pattern: string): RegExp {
+  let re = "";
+  for (let i = 0; i < pattern.length; i++) {
+    if (pattern[i] === "*" && pattern[i + 1] === "*") {
+      re += ".*"; i++; // consume both *
+      if (pattern[i + 1] === "/") i++; // skip optional trailing /
+    } else if (pattern[i] === "*") { re += "[^/]*";
+    } else if (pattern[i] === "?") { re += "[^/]";
+    } else { re += pattern[i].replace(/[.+^${}()|[\]\\]/g, "\\$&"); }
+  }
+  return new RegExp("^" + re + "$");
+}
+
 export class Router {
   private memCache = new Map<string, { hash: string; model: FileHeaderModel }>();
   private gitignore: GitIgnore | undefined;
@@ -95,11 +118,19 @@ export class Router {
   }
 
   handle(req: TsHeaderRequest): string {
-    const abs = this.resolveInWorkspace(req.path);
     const docs: DocsMode = req.docs ?? this.config.docsDefault;
     const maxTokens = req.max_tokens ?? 4000;
     const includeImports = req.includeImports ?? false;
     const matcher = makeMatcher(req.filter);
+
+    // Batch mode: array or single glob string
+    if (Array.isArray(req.path) || GLOB_CHARS.test(req.path)) {
+      const patterns = Array.isArray(req.path) ? req.path : [req.path];
+      return this.handleBatch(patterns, req.depth, docs, maxTokens, includeImports, matcher, req.filter);
+    }
+
+    // Single-path mode (unchanged logic)
+    const abs = this.resolveInWorkspace(req.path);
     const filterNote = matcher ? `// [filter: "${req.filter}" — matching symbols only]\n` : "";
 
     let stat: fs.Stats;
@@ -112,8 +143,8 @@ export class Router {
     if (stat.isDirectory()) {
       return this.directory(abs, maxTokens, matcher, req.filter);
     }
-    // Single-file default: "all" shows non-exported symbols too (more useful for file analysis).
-    const depth: Depth = req.depth ?? "all";
+    // Default "exports" for every path type; the empty-header hint points to depth:"all".
+    const depth: Depth = req.depth ?? "exports";
     if (!TS_FILE.test(abs)) {
       return `// ${req.path} is not a TypeScript file. ts_header handles .ts/.tsx; use your normal file-read tool for this one.`;
     }
@@ -134,6 +165,122 @@ export class Router {
       denseGroupMinLines: this.config.denseGroupMinLines,
       workspaceRoot: this.config.workspaceRoot,
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Batch / single-file helpers
+  // -------------------------------------------------------------------------
+
+  /**
+   * Render a single TS file header. Shared by handle() and handleBatch() so
+   * filter/not-found behavior cannot drift between the two.
+   */
+  private fileHeader(
+    abs: string,
+    depth: Depth,
+    docs: DocsMode,
+    maxTokens: number,
+    includeImports: boolean,
+    matcher?: NameMatcher,
+    filterStr?: string,
+  ): string {
+    const filterNote = matcher ? `// [filter: "${filterStr}" — matching symbols only]\n` : "";
+    if (!TS_FILE.test(abs)) {
+      return `// ${this.rel(abs)} is not a TypeScript file. ts_header handles .ts/.tsx; use your normal file-read tool for this one.`;
+    }
+    let model = this.fileModel(abs, depth);
+    if (!model) return this.notFound(this.rel(abs));
+    if (matcher) {
+      const entries = filterEntries(model.entries as unknown as DeclEntryLike[], matcher) as unknown as FileHeaderModel["entries"];
+      if (entries.length === 0) {
+        return `// no symbols matching "${filterStr}" in ${this.rel(abs)}`;
+      }
+      model = { ...model, entries };
+    }
+    return filterNote + formatFileHeader(model, {
+      depth,
+      docs,
+      includeImports,
+      maxTokens,
+      denseGroupMinLines: this.config.denseGroupMinLines,
+      workspaceRoot: this.config.workspaceRoot,
+    });
+  }
+
+  private handleBatch(
+    patterns: string[],
+    depthOpt: Depth | undefined,
+    docs: DocsMode,
+    maxTokens: number,
+    includeImports: boolean,
+    matcher?: NameMatcher,
+    filterStr?: string,
+  ): string {
+    const files: string[] = [];
+    const notes: string[] = [];
+    for (const p of patterns) {
+      if (GLOB_CHARS.test(p)) {
+        const matched = this.globWalk(p);
+        if (matched.length === 0) notes.push(`// no files matching ${p}`);
+        else files.push(...matched);
+      } else {
+        let abs: string;
+        try { abs = this.resolveInWorkspace(p); } catch { notes.push(this.notFound(p)); continue; }
+        let stat: fs.Stats;
+        try { stat = fs.statSync(abs); } catch { notes.push(this.notFound(p)); continue; }
+        if (stat.isDirectory()) {
+          notes.push(`// ${p} is a directory — pass it as a plain string path instead`);
+        } else if (!TS_FILE.test(abs)) {
+          notes.push(`// ${p} is not a TypeScript file. ts_header handles .ts/.tsx; use your normal file-read tool for this one.`);
+        } else {
+          files.push(abs);
+        }
+      }
+    }
+    // Deduplicate, keeping first position
+    const seen = new Set<string>();
+    const deduped = files.filter((f) => { if (seen.has(f)) return false; seen.add(f); return true; });
+    if (deduped.length > BATCH_FILE_CAP) {
+      return `// batch too large (${deduped.length} files) — narrow the glob or split the call`;
+    }
+    const depth: Depth = depthOpt ?? "exports";
+    const perFile = deduped.length > 0 ? Math.max(500, Math.floor(maxTokens / deduped.length)) : maxTokens;
+    const CHARS_PER_TOKEN = 4;
+    const budgetChars = maxTokens * CHARS_PER_TOKEN;
+    const parts: string[] = [...notes];
+    let used = parts.reduce((n, s) => n + s.length + 1, 0);
+    for (let i = 0; i < deduped.length; i++) {
+      const header = this.fileHeader(deduped[i], depth, docs, perFile, includeImports, matcher, filterStr);
+      if (used + header.length + 2 > budgetChars) {
+        const remaining = deduped.slice(i).map((f) => this.rel(f));
+        parts.push(`// budget exhausted — omitted: ${remaining.join(", ")}`);
+        break;
+      }
+      parts.push(header);
+      used += header.length + 2;
+    }
+    return parts.join("\n\n");
+  }
+
+  private globWalk(pattern: string): string[] {
+    const re = globToRegex(pattern);
+    const root = this.config.workspaceRoot;
+    const results: string[] = [];
+    const walk = (dir: string) => {
+      let entries: fs.Dirent[];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          if (!SKIP_DIRS.has(e.name) && !e.name.startsWith(".") && !this.ignored(p, true)) walk(p);
+        } else if (TS_FILE.test(e.name) && !DTS_FILE.test(e.name) && !this.ignored(p, false)) {
+          const rel = path.relative(root, p).split(path.sep).join("/");
+          if (re.test(rel)) results.push(p);
+        }
+      }
+    };
+    walk(root);
+    return results.sort();
   }
 
   // -------------------------------------------------------------------------

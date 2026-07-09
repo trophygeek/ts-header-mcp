@@ -1,6 +1,6 @@
 # Plan: Batch File Inspection, Import Signatures, Symbol Snippet Previews
 
-Status: IN PROGRESS (Feature 2 done, Feature 3 in progress)
+Status: ALL THREE FEATURES DONE — wrap-up (docs, build, deploy) remaining
 Audience: an implementing agent. Follow the checklist in order; each feature is
 independent but they share doc/test updates, so finish all three before the
 "Documentation" and "Release" sections.
@@ -332,18 +332,18 @@ Feature 2: includeImports
 - [x] Unit tests (extractor + formatter + router option threading)
 
 Feature 3: snippet preview
-- [ ] `model.ts`: `DeclEntry.snippet`
-- [ ] `extractor.ts`: call-expression/object-literal detection in `variableEntries`
-- [ ] `formatter.ts`: snippet line under signature, brief/full length policy
-- [ ] Extend Convex-shaped fixture + unit tests for all three `docs` modes
+- [x] `model.ts`: `DeclEntry.snippet`
+- [x] `extractor.ts`: call-expression/object-literal detection in `variableEntries`
+- [x] `formatter.ts`: snippet line under signature, brief/full length policy
+- [x] Extend Convex-shaped fixture + unit tests for all three `docs` modes
 - [x] Bump `EXTRACTOR_VERSION` to `"4"` in `router.ts` (once, covers 2+3)
 
 Feature 1: batch paths
-- [ ] `router.ts`: widen `TsHeaderRequest.path`; extract `fileHeader()` helper;
+- [x] `router.ts`: widen `TsHeaderRequest.path`; extract `fileHeader()` helper;
       add `handleBatch`, `globWalk`, `globToRegex`, 20-file cap, budget split
-- [ ] `server.ts` zod union + roots-matching fix; `cli.ts` comma-split;
+- [x] `server.ts` zod union + roots-matching fix; `cli.ts` comma-split;
       `http-server.mjs` null-guard fix; `mirica-tool/ts_header.js` description
-- [ ] Unit tests (7 cases listed above)
+- [x] Unit tests (7 cases listed above)
 
 Wrap-up
 - [ ] All documentation checklist items above

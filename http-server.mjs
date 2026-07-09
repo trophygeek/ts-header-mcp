@@ -52,7 +52,7 @@ const server = http.createServer((req, res) => {
     try {
       const body = JSON.parse(raw || "{}");
       if (!body.workspace) return send(400, { ok: false, error: "missing 'workspace' (absolute path to the project to serve)" });
-      if (!body.path) return send(400, { ok: false, error: "missing 'path' (file/dir relative to workspace; '.' for overview)" });
+      if (body.path == null) return send(400, { ok: false, error: "missing 'path' (file/dir relative to workspace; '.' for overview)" });
       const router = getRouter(body.workspace);
       const text = router.handle({
         path: body.path,

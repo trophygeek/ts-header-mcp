@@ -52,13 +52,16 @@ server.registerTool(
       "the source only at the line numbers you need. Start with ts_header(\".\").",
     inputSchema: {
       path: z
-        .string()
-        .describe('File or directory path, relative to the workspace. "." for the project overview.'),
+        .union([z.string(), z.array(z.string())])
+        .describe(
+          'File or directory path relative to the workspace. "." for the project overview. ' +
+            "Pass an array or glob patterns (e.g. \"src/**/*.ts\") for batch multi-file headers (20-file cap)."
+        ),
       depth: z
         .enum(["exports", "all", "deep"])
         .optional()
         .describe(
-          "exports: exported declarations only (default for directories). all: also non-exported and private (default for files). " +
+          "exports (default): exported declarations only. all: also non-exported and private. " +
             "deep: also inner functions/classes nested in function bodies."
         ),
       docs: z
@@ -112,9 +115,12 @@ server.registerTool(
 
     if (clientRoots.length > 0) {
       // Try to match the path to one of the roots
-      if (args.path && args.path !== ".") {
+      const probePath = Array.isArray(args.path)
+        ? args.path.find((p: string) => !/[*?[]/.test(p))
+        : (args.path && args.path !== ".") ? args.path : undefined;
+      if (probePath) {
         for (const root of clientRoots) {
-          const fullPath = path.resolve(root, args.path);
+          const fullPath = path.resolve(root, probePath);
           if (fs.existsSync(fullPath)) {
             chosenRoot = root;
             break;

@@ -17,8 +17,8 @@ const MCP_TOOLS = {
             type: "object",
             properties: {
                 workspace: { type: "string", description: "Absolute path to the TypeScript project root to serve (e.g. the current workspace root)." },
-                path: { type: "string", description: "File or directory path relative to the workspace. '.' for the project overview." },
-                depth: { type: "string", description: "exports: exported declarations only (default for directories). all: also non-exported and private (default for files). deep: also inner functions/classes nested in function bodies." },
+                path: { type: ["string", "array"], description: "File or directory path relative to the workspace. '.' for the project overview. Pass an array or glob patterns (e.g. 'src/**/*.ts') for batch multi-file headers (20-file cap)." },
+                depth: { type: "string", description: "exports (default): exported declarations only. all: also non-exported and private. deep: also inner functions/classes nested in function bodies." },
                 docs: { type: "string", description: "none: signatures only. brief (default): one-sentence doc summaries. full: complete JSDoc including @param/@throws." },
                 max_tokens: { type: "integer", description: "Approximate output budget. Default 4000. Raise if output was truncated." },
                 filter: { type: "string", description: "Show only symbols whose NAME matches this pattern (case-insensitive regex; plain text works too). With path '.', acts as a project-wide typed symbol search." },
@@ -39,6 +39,7 @@ Usage pattern (ls/cat model):
 2. view(workspace, "src") -> per-file export list
 3. view(workspace, "src/foo.ts") -> full signatures with // L-numbers; then read the source file only at those lines.
 Filter example: view(workspace, ".", filter: "booking") = project-wide symbol search.
+Batch example: view(workspace, ["src/a.ts", "src/b.ts"]) or view(workspace, "src/**/*.ts") = multi-file headers in one call (20-file cap).
 `;
 
 function view(params) {

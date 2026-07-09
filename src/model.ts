@@ -68,6 +68,8 @@ export interface FileHeaderModel {
   entries: DeclEntry[];
   /** Collapsed import statements (always extracted; formatter decides visibility). */
   imports: string[];
+  /** Count of declarations hidden by the depth filter (e.g. non-exported at depth:"exports"). */
+  hiddenDeclCount?: number;
   /** Diagnostics that could not be attached to a specific declaration. */
   fileErrors: ErrorMark[];
   /** Ranges the parser could not recover (rare). */
@@ -86,7 +88,7 @@ export interface HeaderOptions {
   maxTokens: number;
   /** Dense-block grouping threshold in rendered lines (design doc §5.3, default 6). */
   denseGroupMinLines: number;
-  /** Absolute workspace root; when set, annotations become clickable file:// URLs. */
+  /** Absolute workspace root (informational; not used for rendering). */
   workspaceRoot?: string;
 }
 

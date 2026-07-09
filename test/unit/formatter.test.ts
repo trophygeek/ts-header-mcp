@@ -9,6 +9,7 @@ import {
   formatFileHeader,
   formatFileToc,
   formatProjectToc,
+  formatRecursiveFileList,
   type DirFileSummary,
 } from "../../src/formatter.js";
 import type { DeclEntry, FileHeaderModel } from "../../src/model.js";
@@ -431,40 +432,207 @@ describe("includeImports", () => {
     assert.ok(!out.includes("-- imports --"));
   });
 });
-describe("file URL annotations (workspaceRoot)", () => {
-  it("emits markdown file:// links in annotations when workspaceRoot is set", () => {
+describe("plain-text annotations (no file:// links)", () => {
+  it("emits plain L-annotations and a plain banner even when workspaceRoot is set", () => {
     const out = formatFileHeader(
       model([entry({ name: "f", text: "export function f(): void", line: 7, endLine: 7 })]),
       { workspaceRoot: "/ws" },
     );
-    // Banner should have a markdown link to the file
-    assert.match(out, /\[src\/a\.ts\]\(file:\/\/\/ws\/src\/a\.ts\)/);
-    // Entry annotation should be a markdown link
-    assert.match(out, /\[L7\]\(file:\/\/\/ws\/src\/a\.ts#L7\)/);
+    assert.match(out, /^\/\/ ==== src\/a\.ts — /);
+    assert.match(out, /\/\/ L7\n/);
   });
 
-  it("emits range annotations as markdown links with L-L fragment", () => {
+  it("emits plain range annotations", () => {
     const out = formatFileHeader(
       model([entry({ name: "f", text: "export function f(): void", line: 7, endLine: 12 })]),
       { workspaceRoot: "/ws" },
     );
-    assert.match(out, /\[L7-12\]\(file:\/\/\/ws\/src\/a\.ts#L7-L12\)/);
+    assert.match(out, /\/\/ L7-12/);
   });
 
-  it("falls back to plain L-annotations when workspaceRoot is absent", () => {
-    const out = formatFileHeader(
-      model([entry({ name: "f", text: "export function f(): void", line: 7, endLine: 7 })]),
-    );
-    assert.match(out, /\/\/ L7\n/);
-    assert.ok(!out.includes("file://"));
-  });
-
-  it("uses file URLs in dense-block group headers", () => {
+  it("output contains no file:// substring anywhere", () => {
     const run = [
       entry({ kind: "type", name: "A", text: "export type A = string;", line: 10, endLine: 10, dense: true }),
       entry({ kind: "interface", name: "B", text: "export interface B { x: number }", line: 11, endLine: 18, dense: true }),
+      entry({ name: "f", text: "export function f(): void", line: 20, endLine: 25 }),
     ];
     const out = formatFileHeader(model(run), { denseGroupMinLines: 6, workspaceRoot: "/ws" });
-    assert.match(out, /-- types: \[L10-18\]\(file:\/\/\/ws\/src\/a\.ts#L10-L18\) --/);
+    assert.ok(!out.includes("file://"), "no file:// links in output");
+    assert.match(out, /-- types: L10-18 --/);
+  });
+});
+describe("snippet preview", () => {
+  const withSnippet = (snippet: string) =>
+    entry({
+      kind: "const",
+      name: "createBooking",
+      text: "export const createBooking: Registered<Args, Promise<Result>>",
+      line: 42,
+      endLine: 88,
+      snippet,
+    });
+
+  it("renders snippet line in brief mode, capped at 120 chars", () => {
+    const out = formatFileHeader(model([withSnippet('args: { id: "x" }')]), { docs: "brief" });
+    assert.ok(out.includes('// args: { id: "x" }'), "snippet line present");
+    // snippet should appear after the signature line
+    assert.ok(out.indexOf("createBooking") < out.indexOf('args: { id: "x" }'));
+  });
+
+  it("elides a long snippet to <= 120 chars in brief mode without a mid-token cut", () => {
+    const long = "args: { " + "x".repeat(200) + " }";
+    const out = formatFileHeader(model([withSnippet(long)]), { docs: "brief" });
+    const snippetLine = out.split("\n").find((l) => l.includes("// args:"));
+    assert.ok(snippetLine, "snippet line present");
+    // "    // " prefix is 7 chars, snippet capped at 120 → total ≤ 127
+    const text = snippetLine!.trimStart().replace(/^\/\/ /, "");
+    assert.ok(text.length <= 121, `snippet text is ${text.length} chars, expected <= 121`);
+    assert.ok(text.endsWith("…") || / …\d* ?more?\s*\}?$/.test(text) || /…\d+ more/.test(text), `elision marker present: ${text}`);
+  });
+
+  it("renders full snippet in full mode (no 120-char cap)", () => {
+    const long = "args: { " + "field".repeat(30) + " }";
+    const out = formatFileHeader(model([withSnippet(long)]), { docs: "full" });
+    // In full mode the snippet can be longer than 120 chars across continuation lines
+    assert.ok(out.includes("args:"), "snippet present");
+  });
+
+  it("does not render snippet when docs is none", () => {
+    const out = formatFileHeader(model([withSnippet('args: { id: "x" }')]), { docs: "none" });
+    assert.ok(!out.includes('args: { id: "x" }'), "no snippet in docs:none");
+  });
+
+  it("does not render snippet for entries without one", () => {
+    const plain = entry({ name: "f", text: "export function f(): void" });
+    const out = formatFileHeader(model([plain]), { docs: "brief" });
+    assert.ok(!out.includes("args:"), "no snippet for plain function");
+  });
+});
+describe("default export rendering", () => {
+  const schemaEntry = (): DeclEntry =>
+    entry({
+      kind: "const",
+      name: "defineSchema",
+      text: "export default defineSchema({...})",
+      line: 6,
+      endLine: 258,
+      isDefault: true,
+      children: [
+        entry({ kind: "property", name: "bookings", text: "bookings", line: 12, endLine: 12, exported: false }),
+        entry({ kind: "property", name: "schedules", text: "schedules", line: 48, endLine: 48, exported: false }),
+        entry({ kind: "property", name: "profiles", text: "profiles", line: 90, endLine: 90, exported: false }),
+      ],
+    });
+
+  it("renders the default export with its L-range annotation", () => {
+    const out = formatFileHeader(model([schemaEntry()]));
+    assert.match(out, /export default defineSchema\(\{\.\.\.\}\)\s+\/\/ L6-258/);
+  });
+
+  it("renders top-level keys as indented child lines with their line numbers", () => {
+    const out = formatFileHeader(model([schemaEntry()]));
+    assert.match(out, /\n  bookings\s+\/\/ L12/);
+    assert.match(out, /\n  schedules\s+\/\/ L48/);
+    assert.match(out, /\n  profiles\s+\/\/ L90/);
+  });
+});
+describe("empty headers", () => {
+  it("points to depth:\"all\" when depth-hidden declarations exist", () => {
+    const out = formatFileHeader(model([], { hiddenDeclCount: 14 }), { depth: "exports" });
+    assert.match(out, /\/\/ no symbols at depth:"exports" — 14 non-exported declarations exist; try depth:"all"/);
+    assert.ok(!out.includes("L-numbers above"), "no misleading hint line");
+  });
+
+  it("says the file has nothing extractable when truly empty", () => {
+    const out = formatFileHeader(model([], { hiddenDeclCount: 0 }));
+    assert.match(out, /\/\/ no extractable declarations — read the file directly/);
+    assert.ok(!out.includes("L-numbers above"), "no misleading hint line");
+  });
+});
+describe("args-line gating", () => {
+  it("suppresses the args line when it restates the rendered signature's property names", () => {
+    const e = entry({
+      kind: "const",
+      name: "getSchedule",
+      text: 'export const getSchedule: RegisteredQuery<"public", { scheduleId: Id<"schedules">; }, Promise<unknown>>',
+      line: 10,
+      endLine: 20,
+      snippet: 'args: { scheduleId: v.id("schedules"), }',
+    });
+    const out = formatFileHeader(model([e]), { docs: "brief" });
+    assert.ok(!out.includes("// args:"), `redundant args line should be suppressed:\n${out}`);
+  });
+
+  it("keeps the args line when the rendered signature was elided with …n more", () => {
+    const bigArgs = Array.from({ length: 8 }, (_, i) => `veryLongPropertyNameNumber${i}: string`).join("; ");
+    const e = entry({
+      kind: "const",
+      name: "createBooking",
+      text: `export const createBooking: Registered<{ ${bigArgs} }, Promise<void>>`,
+      line: 10,
+      endLine: 60,
+      snippet: "args: { " + Array.from({ length: 8 }, (_, i) => `veryLongPropertyNameNumber${i}: v.string()`).join(", ") + " }",
+    });
+    const out = formatFileHeader(model([e]), { docs: "brief" });
+    assert.ok(out.includes("// args:"), `args line should be kept when signature is elided:\n${out}`);
+  });
+
+  it("keeps the args line when it shows names the signature does not", () => {
+    const e = entry({
+      kind: "const",
+      name: "m",
+      text: "export const m: Registered<{ id: string; }, Promise<void>>",
+      line: 1,
+      endLine: 5,
+      snippet: "args: { id: v.id(), extraFlag: v.boolean() }",
+    });
+    const out = formatFileHeader(model([e]), { docs: "brief" });
+    assert.ok(out.includes("// args:"), "args line kept — extraFlag not in signature");
+  });
+
+  it("never truncates an args line mid-identifier; elides whole properties with …n more", () => {
+    const props = Array.from({ length: 10 }, (_, i) => `anExtremelyLongIdentifierNumber${i}: v.string()`);
+    const e = entry({
+      kind: "const",
+      name: "m",
+      text: "export const m: SomethingOpaque",
+      line: 1,
+      endLine: 40,
+      snippet: `args: { ${props.join(", ")} }`,
+    });
+    const out = formatFileHeader(model([e]), { docs: "brief" });
+    const line = out.split("\n").find((l) => l.includes("// args:"));
+    assert.ok(line, "args line present");
+    assert.match(line!, /…\d+ more/, "whole-property elision marker present");
+    // Every identifier that appears must be complete
+    for (const m2 of line!.matchAll(/anExtremelyLongIdentifierNumber\d*/g)) {
+      assert.match(m2[0], /^anExtremelyLongIdentifierNumber\d+$/, `mid-identifier cut: ${m2[0]}`);
+    }
+    assert.ok(!/[A-Za-z_$]…/.test(line!), "no identifier is cut directly before the ellipsis");
+  });
+});
+describe("batch hint after multi-file filter results", () => {
+  const mf = (relPath: string) => ({ relPath, totalLines: 10, exportNames: ["x1"], isTest: false });
+
+  it("spells out the batch call listing the matched files", () => {
+    const out = formatRecursiveFileList("convex", [mf("convex/bookingsWaitlist.ts"), mf("convex/bookingsCheckIn.ts"), mf("convex/bookingsCore.ts"), mf("convex/bookingsCancel.ts")]);
+    assert.ok(
+      out.includes('// full headers for all matches: ts_header(["convex/bookingsWaitlist.ts", "convex/bookingsCheckIn.ts", "convex/bookingsCore.ts", "convex/bookingsCancel.ts"])'),
+      `batch hint present:\n${out}`
+    );
+  });
+
+  it("caps the spelled-out list at 5 files", () => {
+    const files = Array.from({ length: 8 }, (_, i) => mf(`src/f${i}.ts`));
+    const out = formatRecursiveFileList("src", files);
+    const hint = out.split("\n").find((l) => l.includes("full headers for all matches"))!;
+    assert.ok(hint, "hint line present");
+    assert.equal((hint.match(/\.ts"/g) ?? []).length, 5, "exactly 5 files listed");
+    assert.ok(hint.includes("…"), "remainder elided");
+  });
+
+  it("emits no batch hint for a single match", () => {
+    const out = formatRecursiveFileList("src", [mf("src/only.ts")]);
+    assert.ok(!out.includes("full headers for all matches"));
   });
 });

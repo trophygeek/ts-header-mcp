@@ -4,7 +4,6 @@
  * All rendering rules live here; the extractor knows nothing about layout.
  */
 
-import path from "node:path";
 import type {
   DeclEntry,
   FileHeaderModel,
@@ -16,25 +15,7 @@ const ANNOT_COL = 64; // column where trailing "// Lnn" comments aim to start
 const CHARS_PER_TOKEN = 4;
 const FILE_ERROR_BANNER_THRESHOLD = 10;
 
-// ---------------------------------------------------------------------------
-// File URL helpers — clickable markdown links to source locations
-// ---------------------------------------------------------------------------
-
-type LineLinker = (line: number, endLine?: number) => string;
-
-function makeLinker(opts: HeaderOptions, relPath: string): LineLinker | undefined {
-  if (!opts.workspaceRoot) return undefined;
-  const abs = path.resolve(opts.workspaceRoot, relPath);
-  const fileUri = "file://" + abs;
-  return (line, endLine) => {
-    const frag = endLine && endLine !== line ? `#L${line}-L${endLine}` : `#L${line}`;
-    const label = endLine && endLine !== line ? `L${line}-${endLine}` : `L${line}`;
-    return `[${label}](${fileUri}${frag})`;
-  };
-}
-
-function lineRef(linker: LineLinker | undefined, line: number, endLine?: number): string {
-  if (linker) return linker(line, endLine);
+function lineRef(line: number, endLine?: number): string {
   return endLine && endLine !== line ? `L${line}-${endLine}` : `L${line}`;
 }
 
@@ -44,11 +25,9 @@ export function formatFileHeader(
 ): string {
   const opts: HeaderOptions = { ...DEFAULT_OPTIONS, ...partial };
   const out: string[] = [];
-  const linker = makeLinker(opts, model.path);
 
-  const pathDisplay = linker && opts.workspaceRoot ? `[${model.path}](file://${path.resolve(opts.workspaceRoot, model.path)})` : model.path;
   out.push(
-      `// ==== ${pathDisplay} — ${model.totalLines} lines, ${model.exportCount} export${model.exportCount === 1 ? "" : "s"} ====`
+      `// ==== ${model.path} — ${model.totalLines} lines, ${model.exportCount} export${model.exportCount === 1 ? "" : "s"} ====`
   );
 
   if (model.fileDoc) {
@@ -75,10 +54,20 @@ export function formatFileHeader(
     return finish(out, model, opts);
   }
 
-  renderEntries(model.entries, out, opts, 0, linker);
+  renderEntries(model.entries, out, opts, 0);
 
   for (const r of model.skippedRanges) {
     out.push(`// ⚠ L${r.from}-${r.to}: skipped, ${r.message}`);
+  }
+
+  if (model.entries.length === 0) {
+    const hidden = model.hiddenDeclCount ?? 0;
+    if (hidden > 0) {
+      out.push(`// no symbols at depth:"${opts.depth}" — ${hidden} non-exported declaration${hidden === 1 ? "" : "s"} exist; try depth:"all"`);
+    } else {
+      out.push("// no extractable declarations — read the file directly");
+    }
+    return truncateToBudget(out, opts).join("\n");
   }
   return finish(out, model, opts);
 }
@@ -98,8 +87,7 @@ function renderEntries(
     entries: DeclEntry[],
     out: string[],
     opts: HeaderOptions,
-    indentLevel: number,
-    linker?: LineLinker
+    indentLevel: number
 ): void {
   const indent = "  ".repeat(indentLevel);
   let i = 0;
@@ -113,7 +101,7 @@ function renderEntries(
       if (sourceSpan > opts.denseGroupMinLines && run.length >= 2) {
         const from = run[0].line;
         const to = run[run.length - 1].endLine;
-        out.push(`${indent}// -- ${denseLabel(run)}: ${lineRef(linker, from, to)} --`);
+        out.push(`${indent}// -- ${denseLabel(run)}: ${lineRef(from, to)} --`);
         for (const e of run) {
           renderDoc(e, out, opts, indent, "before");
           out.push(indent + getRenderText(e) + deprecatedMark(e));
@@ -130,7 +118,7 @@ function renderEntries(
         entries[i].kind === "function" &&
         entries[i + 1]?.kind === "function" &&
         entries[i + 1].name === entries[i].name;
-    renderEntry(entries[i], out, opts, indentLevel, linker, isOverloadContinuation);
+    renderEntry(entries[i], out, opts, indentLevel, isOverloadContinuation);
     i++;
   }
 }
@@ -140,7 +128,6 @@ function renderEntry(
     out: string[],
     opts: HeaderOptions,
     indentLevel: number,
-    linker?: LineLinker,
     suppressTrailingBlank = false
 ): void {
   const indent = "  ".repeat(indentLevel);
@@ -153,24 +140,25 @@ function renderEntry(
   const firstLine = indent + text.split("\n")[0] + openBrace;
   const rest = text.split("\n").slice(1).map((l) => indent + l);
 
-  out.push(padAnnotate(firstLine, annotation(e, linker)));
+  out.push(padAnnotate(firstLine, annotation(e)));
   out.push(...rest);
   renderDoc(e, out, opts, indent, "after");
+  renderSnippet(e, out, opts, indent);
 
   if (hasChildren) {
-    renderEntries(e.children ?? [], out, opts, indentLevel + 1, linker);
+    renderEntries(e.children ?? [], out, opts, indentLevel + 1);
   }
   if (isContainer) out.push(indent + "}");
   if (indentLevel === 0 && !suppressTrailingBlank) out.push("");
 }
 
-function annotation(e: DeclEntry, linker?: LineLinker): string {
-  let a = `// ${lineRef(linker, e.line, e.endLine)}`;
+function annotation(e: DeclEntry): string {
+  let a = `// ${lineRef(e.line, e.endLine)}`;
   if (e.doc?.deprecated) {
     a += ` ⚠ deprecated`;
   }
   if (e.error) {
-    const at = e.error.line !== e.line ? `at ${lineRef(linker, e.error.line)} ` : "";
+    const at = e.error.line !== e.line ? `at ${lineRef(e.error.line)} ` : "";
     a += ` ⚠ ${at}TS${e.error.code}: ${e.error.message} — type unreliable`;
   }
   return a;
@@ -206,6 +194,80 @@ function renderDoc(
     if (briefPosition === "before") out.push(indent + "// " + e.doc.brief);
     else out.push(indent + "    // " + e.doc.brief);
   }
+}
+
+function renderSnippet(
+    e: DeclEntry,
+    out: string[],
+    opts: HeaderOptions,
+    indent: string,
+): void {
+  if (opts.docs === "none" || !e.snippet) return;
+  if (snippetIsRedundant(e)) return;
+  let text = e.snippet;
+  if (opts.docs === "brief") {
+    if (text.length > 120) text = elideSnippetWholeProps(text, 120);
+    out.push(indent + "    // " + text);
+  } else {
+    // full mode: wrap at ~110 chars per continuation line
+    const prefix = indent + "    // ";
+    while (text.length > 0) {
+      const chunk = text.slice(0, 110);
+      text = text.slice(110);
+      out.push(prefix + chunk + (text.length > 0 ? "" : ""));
+    }
+  }
+}
+
+/**
+ * An "args:" snippet is redundant when every property NAME it shows is
+ * already visible in the rendered signature — same names, nothing new.
+ * It is kept when the rendered signature elided properties ("…n more") or
+ * when the snippet names differ from what the signature shows.
+ */
+function snippetIsRedundant(e: DeclEntry): boolean {
+  if (!e.snippet || !e.snippet.startsWith("args:")) return false;
+  const rendered = getRenderText(e);
+  if (rendered.includes("…")) return false; // signature elided — snippet adds info
+  const snippetNames = topLevelPropNames(e.snippet.replace(/^args:\s*/, ""));
+  if (snippetNames.length === 0) return false;
+  // Property names visible anywhere in the rendered signature.
+  const renderedNames = new Set(
+      [...rendered.matchAll(/([A-Za-z_$][\w$]*)\??:/g)].map((m) => m[1])
+  );
+  return snippetNames.every((n) => renderedNames.has(n));
+}
+
+/** Top-level property names of an object-literal-ish string `{ a: 1, b: 2 }`. */
+function topLevelPropNames(objText: string): string[] {
+  const t = objText.trim();
+  if (!t.startsWith("{") || !t.endsWith("}")) return [];
+  return splitProperties(t.slice(1, -1))
+      .map((p) => p.match(/^([A-Za-z_$][\w$]*|"[^"]*"|'[^']*')\s*[?]?\s*:/)?.[1])
+      .filter((n): n is string => !!n)
+      .map((n) => n.replace(/^["']|["']$/g, ""));
+}
+
+/**
+ * Elide a snippet to `max` chars WITHOUT cutting mid-identifier: for
+ * `label: { p1, p2, … }` shapes, drop whole trailing properties and append
+ * "…n more". Falls back to a whitespace-boundary cut for other shapes.
+ */
+function elideSnippetWholeProps(text: string, max: number): string {
+  const m = text.match(/^([\w$]+:\s*)\{([\s\S]*)\}\s*$/);
+  if (m) {
+    const [, label, inner] = m;
+    const props = splitProperties(inner);
+    for (let keep = props.length - 1; keep >= 1; keep--) {
+      const candidate = `${label}{ ${props.slice(0, keep).join(", ")}, …${props.length - keep} more }`;
+      if (candidate.length <= max) return candidate;
+    }
+    return `${label}{ …${props.length} more }`;
+  }
+  // Non-object snippet: cut at the last whitespace before the cap.
+  const slice = text.slice(0, max - 1);
+  const cut = slice.lastIndexOf(" ");
+  return (cut > 0 ? slice.slice(0, cut) : slice) + " …";
 }
 
 function denseLabel(run: DeclEntry[]): string {
@@ -287,6 +349,14 @@ export function formatRecursiveFileList(
     out.push(
       `${(f.relPath + tag).padEnd(pathW)} ${String(f.totalLines + "L").padStart(6)}   ${desc}`
     );
+  }
+  if (files.length > 1) {
+    // Spell out the batch call — field transcripts show agents never discover
+    // the array-path feature from the schema and fall back to N single calls.
+    const shown = files.slice(0, 5).map((f) => `"${f.relPath}"`);
+    const tail = files.length > 5 ? ", …" : "";
+    out.push("");
+    out.push(`// full headers for all matches: ts_header([${shown.join(", ")}${tail}])`);
   }
   return out.join("\n");
 }

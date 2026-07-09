@@ -20,6 +20,8 @@ import type {
 
 const MAX_ERR_MSG = 90;
 const BRIEF_MAX = 100;
+/** Max raw snippet length before hard-cap truncation in the extractor. */
+const MAX_SNIPPET_LEN = 600;
 /** Max rendered length for a variable/property type before eliding with … */
 const MAX_TYPE_LEN = 999999;
 /** Max rendered length for a full signature line before eliding with … */
@@ -61,6 +63,7 @@ export function extract(input: ExtractInput): FileHeaderModel {
   const imports: string[] = [];
   let statementCount = 0;
   let reexportCount = 0;
+  let hiddenDeclCount = 0;
 
   for (const stmt of sourceFile.statements) {
     statementCount++;
@@ -86,7 +89,10 @@ export function extract(input: ExtractInput): FileHeaderModel {
       }
     }
     for (const e of extracted) {
-      if (depth === "exports" && !e.exported) continue;
+      if (depth === "exports" && !e.exported) {
+        hiddenDeclCount++;
+        continue;
+      }
       entries.push(e);
     }
   }
@@ -104,6 +110,7 @@ export function extract(input: ExtractInput): FileHeaderModel {
     reexports,
     entries,
     imports,
+    hiddenDeclCount,
     fileErrors: errors.unattached,
     skippedRanges: [],
   };
@@ -221,6 +228,9 @@ function extractStatement(
   }
   if (ts.isVariableStatement(stmt)) {
     return variableEntries(stmt, checker, sf, depth, errors);
+  }
+  if (ts.isExportAssignment(stmt) && !stmt.isExportEquals) {
+    return [defaultExportEntry(stmt, sf, errors)];
   }
   return [];
 }
@@ -559,6 +569,7 @@ function variableEntries(
     // a const spanning many lines must keep its own line annotation, or the
     // header loses its jump targets. Dense (= groupable) only when small.
     const span = endLine - line + 1;
+    const snippet = extractSnippet(decl, sf);
     out.push({
                kind: kw as DeclKind,
                name,
@@ -569,6 +580,7 @@ function variableEntries(
                dense: span <= DENSE_MAX_CONST_LINES,
                doc: docInfo(stmt, sf),
                error: errors.claim(line, endLine),
+               snippet,
              });
   }
   return out;
@@ -633,8 +645,12 @@ function firstSentence(text: string): string | undefined {
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean) return undefined;
   const m = clean.match(/^.*?[.!?](?=\s|$)/);
-  const s = (m ? m[0] : clean).slice(0, BRIEF_MAX);
-  return s;
+  const s = m ? m[0] : clean;
+  if (s.length <= BRIEF_MAX) return s;
+  // Over the cap: cut at the last word boundary before it, not mid-word.
+  const slice = s.slice(0, BRIEF_MAX - 1);
+  const cut = slice.lastIndexOf(" ");
+  return (cut > 0 ? slice.slice(0, cut) : slice) + "…";
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +674,138 @@ function lines(
   const line = sf.getLineAndCharacterOfPosition(nameNode.getStart(sf)).line + 1;
   const endLine = sf.getLineAndCharacterOfPosition(fullNode.getEnd()).line + 1;
   return { line, endLine };
+}
+
+// ---------------------------------------------------------------------------
+// Snippet extraction for framework-wrapper consts (Feature 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * For `const x = framework({ args: {...}, handler: ... })` patterns, extract
+ * a collapsed snippet of the `args` shape or handler parameter list.
+ * Returns undefined for plain consts, non-call initializers, etc.
+ */
+function extractSnippet(decl: ts.VariableDeclaration, sf: ts.SourceFile): string | undefined {
+  if (!decl.initializer || !ts.isCallExpression(decl.initializer)) return undefined;
+  const call = decl.initializer;
+  // Find the first object-literal argument
+  const objArg = call.arguments.find((a) => ts.isObjectLiteralExpression(a)) as
+      ts.ObjectLiteralExpression | undefined;
+  if (!objArg) return undefined;
+
+  // Priority 1: an `args` property (Convex convention)
+  const argsProp = objArg.properties.find(
+      (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "args"
+  ) as ts.PropertyAssignment | undefined;
+  if (argsProp) {
+    let text = "args: " + argsProp.initializer.getText(sf).replace(/\s+/g, " ");
+    if (text.length > MAX_SNIPPET_LEN) text = text.slice(0, MAX_SNIPPET_LEN - 1) + "…";
+    return text;
+  }
+
+  // Priority 2: a handler / first function-valued property → parameter list
+  const fnProp = findFnProp(objArg, sf);
+  if (fnProp) {
+    return fnProp;
+  }
+
+  return undefined;
+}
+
+/** Find a function-valued property (prefer "handler") and return its collapsed parameter text. */
+function findFnProp(obj: ts.ObjectLiteralExpression, sf: ts.SourceFile): string | undefined {
+  let fallback: ts.PropertyAssignment | undefined;
+  for (const p of obj.properties) {
+    if (!ts.isPropertyAssignment(p)) continue;
+    const init = p.initializer;
+    if (!ts.isArrowFunction(init) && !ts.isFunctionExpression(init)) continue;
+    const name = ts.isIdentifier(p.name) ? p.name.text : p.name.getText(sf);
+    if (name === "handler") {
+      const params = init.parameters.map((pm) => pm.getText(sf)).join(", ").replace(/\s+/g, " ");
+      let text = `handler(${params})`;
+      if (text.length > MAX_SNIPPET_LEN) text = text.slice(0, MAX_SNIPPET_LEN - 1) + "…";
+      return text;
+    }
+    if (!fallback) fallback = p;
+  }
+  if (fallback) {
+    const init = fallback.initializer as ts.ArrowFunction | ts.FunctionExpression;
+    const name = ts.isIdentifier(fallback.name) ? fallback.name.text : fallback.name.getText(sf);
+    const params = init.parameters.map((pm) => pm.getText(sf)).join(", ").replace(/\s+/g, " ");
+    let text = `${name}(${params})`;
+    if (text.length > MAX_SNIPPET_LEN) text = text.slice(0, MAX_SNIPPET_LEN - 1) + "…";
+    return text;
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Default exports (export default <expr>)
+// ---------------------------------------------------------------------------
+
+/**
+ * `export default someCall({...})` — e.g. a Convex schema's
+ * `export default defineSchema({...})` — must surface as a declaration, or
+ * the file renders as "0 exports" with an empty body (field report 2026-07).
+ * When the expression is a call whose first argument is an object literal,
+ * the object's top-level keys become children with their own line numbers.
+ */
+function defaultExportEntry(
+    stmt: ts.ExportAssignment,
+    sf: ts.SourceFile,
+    errors: ErrorIndex
+): DeclEntry {
+  const expr = stmt.expression;
+  const line = sf.getLineAndCharacterOfPosition(stmt.getStart(sf)).line + 1;
+  const endLine = sf.getLineAndCharacterOfPosition(stmt.getEnd()).line + 1;
+
+  let text: string;
+  let name = "default";
+  let children: DeclEntry[] | undefined;
+
+  if (ts.isCallExpression(expr)) {
+    const callee = expr.expression.getText(sf).replace(/\s+/g, " ");
+    name = callee;
+    const firstArg = expr.arguments[0];
+    if (firstArg && ts.isObjectLiteralExpression(firstArg)) {
+      text = `export default ${callee}({...})`;
+      const keys: DeclEntry[] = [];
+      for (const p of firstArg.properties) {
+        const keyName = p.name ? p.name.getText(sf) : p.getText(sf).slice(0, 40);
+        const kLine = sf.getLineAndCharacterOfPosition(p.getStart(sf)).line + 1;
+        keys.push({
+          kind: "property",
+          name: keyName,
+          text: keyName,
+          line: kLine,
+          endLine: kLine,
+          exported: false,
+          dense: false,
+        });
+      }
+      if (keys.length > 0) children = keys;
+    } else {
+      text = `export default ${callee}(…)`;
+    }
+  } else {
+    let collapsed = expr.getText(sf).replace(/\s+/g, " ").trim();
+    if (collapsed.length > 80) collapsed = collapsed.slice(0, 79) + "…";
+    text = `export default ${collapsed}`;
+  }
+
+  return {
+    kind: "const",
+    name,
+    text,
+    line,
+    endLine,
+    exported: true,
+    isDefault: true,
+    dense: false,
+    doc: docInfo(stmt, sf),
+    error: errors.claim(line, endLine),
+    children,
+  };
 }
 
 function countExports(entries: DeclEntry[]): number {

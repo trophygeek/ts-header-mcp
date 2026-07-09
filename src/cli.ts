@@ -18,7 +18,8 @@ function main() {
   }
 
   const workspaceRoot = args[0];
-  const reqPath = args[1];
+  // Comma-separated paths → array for batch mode
+  const reqPath: string | string[] = args[1].includes(",") ? args[1].split(",").map((s) => s.trim()) : args[1];
 
   // Parse optional flags
   let depth: "exports" | "all" | "deep" | undefined;
