@@ -12,19 +12,25 @@ const MCP_TOOL_META = {
 
 const MCP_TOOLS = {
     view: {
-        description: "View TypeScript code as a compact header: every function, class, and type signature with its source line number (// L45). Give a directory path to see what each file exports; give a file path to see all its signatures. Works even when the code has errors. Use this INSTEAD of reading whole .ts files - then read source only at the line numbers you need. Start with path '.' for a project overview.",
+        description: "View TypeScript code as a compact header: every function, class, and type signature with its source line number (// L45). Give a directory path to see what each file exports; give a file path/glob/array to see signatures. Works even when the code has errors. Use this INSTEAD of reading whole .ts files - then read source only at the line numbers you need. Start with path '.' for a project overview.",
         parameters: {
             type: "object",
             properties: {
-                workspace: { type: "string", description: "Absolute path to the TypeScript project root to serve (e.g. the current workspace root)." },
-                path: { type: ["string", "array"], description: "File or directory path relative to the workspace. '.' for the project overview. Pass an array or glob patterns (e.g. 'src/**/*.ts') for batch multi-file headers (20-file cap)." },
+                workspace: { type: "string", description: "Optional absolute path to the TypeScript project root. If omitted, the tool will attempt to auto-detect the workspace directory." },
+                path: {
+                    anyOf: [
+                        { type: "string" },
+                        { type: "array", items: { type: "string" } }
+                    ],
+                    description: "File or directory path relative to the workspace. '.' for the project overview. Supports glob patterns or an array of paths for batch headers (cap of 20)."
+                },
                 depth: { type: "string", description: "exports (default): exported declarations only. all: also non-exported and private. deep: also inner functions/classes nested in function bodies." },
                 docs: { type: "string", description: "none: signatures only. brief (default): one-sentence doc summaries. full: complete JSDoc including @param/@throws." },
                 max_tokens: { type: "integer", description: "Approximate output budget. Default 4000. Raise if output was truncated." },
                 filter: { type: "string", description: "Show only symbols whose NAME matches this pattern (case-insensitive regex; plain text works too). With path '.', acts as a project-wide typed symbol search." },
                 includeImports: { type: "boolean", description: "When true, include the file's import statements in the header output. Default false." }
             },
-            required: ["workspace", "path"]
+            required: ["path"]
         }
     }
 };
@@ -38,17 +44,28 @@ Usage pattern (ls/cat model):
 1. view(workspace, ".") -> project overview (directories + top exports)
 2. view(workspace, "src") -> per-file export list
 3. view(workspace, "src/foo.ts") -> full signatures with // L-numbers; then read the source file only at those lines.
+4. view(workspace, "src/**/*.ts", { includeImports: true }) -> batch view files matching glob with their imports.
 Filter example: view(workspace, ".", filter: "booking") = project-wide symbol search.
-Batch example: view(workspace, ["src/a.ts", "src/b.ts"]) or view(workspace, "src/**/*.ts") = multi-file headers in one call (20-file cap).
 `;
 
 function view(params) {
+    let workspace = params.workspace;
+    if (!workspace) {
+        if (typeof process !== "undefined") {
+            workspace = process.env.WORKSPACE_ROOT || process.env.PROJECT_ROOT || process.env.PWD || process.cwd();
+        }
+    }
+
+    if (!workspace) {
+        return "ERROR: 'workspace' parameter is missing and could not be determined automatically.";
+    }
+
     let resp;
     try {
         resp = fetch(TS_HEADER_URL, {
             method: "POST",
             body: {
-                workspace: params.workspace,
+                workspace: workspace,
                 path: params.path,
                 depth: params.depth,
                 docs: params.docs,
