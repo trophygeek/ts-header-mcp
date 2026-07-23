@@ -36,6 +36,7 @@ What ts-header does that the above do not, in combination:
 - Works on code that does not compile, with per-symbol error markers
 - Includes non-exported and function-local declarations on request
 - No files written by default, so nothing can leak into version control
+- Focused results with fewer tool calls to improve LLM attention
 
 ## The tool
 
