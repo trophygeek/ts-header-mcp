@@ -85,8 +85,8 @@ The session with `ts_header` was more efficient (index-driven discovery instead 
 Requires Node 20+ and [pnpm](https://pnpm.io).
 
 ```bash
-git clone https://github.com/<your-username>/ts-header-mcp.git ~/tools/ts-header
-cd ~/tools/ts-header
+git clone https://github.com/trophygeek/ts-header-mcp.git ~/tools/ts-header-mcp
+cd ~/tools/ts-header-mcp
 pnpm install
 pnpm test                    # quiet unit suite (extractor, formatter, router)
 pnpm run smoke-test          # verbose: prints full example headers for eyeballing
@@ -131,7 +131,7 @@ Create `.vscode/mcp.json` in your workspace (this file is safe to commit) or run
     "ts-header": {
       "type": "stdio",
       "command": "node",
-      "args": ["/home/you/tools/ts-header/dist/server.js", "${workspaceFolder}"]
+      "args": ["/home/you/tools/ts-header-mcp/dist/server.js", "${workspaceFolder}"]
     }
   }
 }
@@ -148,7 +148,7 @@ Create `.cursor/mcp.json` in the project, or `~/.cursor/mcp.json` for all projec
   "mcpServers": {
     "ts-header": {
       "command": "node",
-      "args": ["/home/you/tools/ts-header/dist/server.js", "/path/to/your/workspace"]
+      "args": ["/home/you/tools/ts-header-mcp/dist/server.js", "/path/to/your/workspace"]
     }
   }
 }
@@ -169,7 +169,7 @@ Replace the two placeholders and paste into the agent panel:
 Set up a local MCP server called ts-header for me. Follow these steps exactly and
 verify each one before moving to the next. Do not skip the test step.
 
-SOURCE: https://github.com/<your-username>/ts-header-mcp.git
+SOURCE: https://github.com/trophygeek/ts-header-mcp.git
 WORKSPACE IT WILL SERVE: <PATH_TO_MY_TS_PROJECT>
 
 1. PRE-FLIGHT CHECK:
