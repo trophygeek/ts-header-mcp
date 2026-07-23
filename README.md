@@ -38,7 +38,7 @@ What ts-header does that the above do not, in combination:
 - No files written by default, so nothing can leak into version control
 - Focused results with fewer tool calls to improve LLM attention
 
-(See comparison below.) 
+(See the comparison table below.)
 
 ## The tool
 
@@ -64,76 +64,35 @@ For framework-wrapper declarations like Convex's `export const f = mutation({ ar
 | **Includes Private/Local Symbols**| **Optional** | Yes | No | No |
 
 
-## Comparison of `ts_header` tool and standard `grep` exploration
+## Why use it
 
-Ran the exact same query `Explain how waitlist queues work in this project` over a large, complex project. One session used `ts_header` and the other did not.
-Thes test used same LLM (Google Flash 3.5) in Antigravity IDE.
+Agents that orient by grepping and reading whole files burn tokens on noise and still miss things. To measure the difference, we ran the same query — *"Explain how waitlist queues work in this project"* — over a large monorepo in two sessions with the same LLM: one with `ts_header`, one without.
 
-### Summary Comparison
+| Dimension | Without `ts_header` | With `ts_header` |
+| :--- | :--- | :--- |
+| **Initial discovery strategy** | Unfiltered `grep_search("waitlist")` (200 matches) | Structured `ts_header` directory scan & filter |
+| **Module coverage** | Found 4 key files; missed 2 | Found all 5 waitlist-related files |
+| **Tool execution efficiency** | Trial-and-error grepping + full-file viewing | Directory overview → filtered signatures → targeted line views |
+| **Explanation completeness** | Solid overview, missed two entry points | Complete end-to-end trace, including admin releases and background notifications |
 
-| Dimension | Session 1 (`NO ts_header tool`)                                                                                                                            | Session 2 (`with ts_header`)                                                                 |
-| :--- |:-----------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------|
-| **Initial Discovery Strategy** | Unfiltered `grep_search("waitlist")` (200 matches)                                                                                                         | Structured `ts_header` directory scan & filter                                               |
-| **Module Coverage** | Found 4 key files; missed `bookingsCheckIn.ts` in `convex/convex/bookingsCheckIn.ts` & `bookingsNotifications.ts` `convex/convex/bookingsNotifications.ts` | Found all 5 waitlist-related files across `convex/` and `domain/`                            |
-| **Tool Execution Efficiency** | Trial-and-error grepping + full-file viewing                                                                                                               | Hierarchical: Directory overview → Filtered signatures → Targeted line views                 |
-| **Explanation Completeness** | Solid overview of placement, offering, claiming, and expiration                                                                                            | Complete end-to-end trace including admin no-show spot releases and background notifications |
-
----
-
-### Detailed Comparison & Evaluation
-
-#### 1. Information Discovery & Signal-to-Noise Ratio
-* **Session 1 Strategy**:
-    1. `grep_search("waitlist")` (200 matches across web app, admin app, tests, docs).
-    2. `view_file` on `bookingsWaitlist.ts` (entire 373 lines at once).
-    3. `grep_search("offerSpotToWaitlist")`.
-    4. `view_file` on `bookingRules.ts`.
-    5. `grep_search('bookingStatus: "waitlisted"')` (0 matches due to quotes formatting).
-    6. `view_file` on `bookings.ts`.
-    * *Drawback*: High noise level, unstructured exploration, and redundant view calls.
-
-* **Session 2 Strategy**:
-    1. `ts_header(".")`: Identified major modules (`apps/`, `convex/`, `domain/`, `tooling/`).
-    2. `ts_header(".", { filter: "waitlist" })`: Instantly returned the exact matching files:
-        - `convex/bookingsCheckIn.ts` (`releaseSpotToWaitlist`)
-        - `convex/bookingsNotifications.ts` (`sendWaitlistOfferNotification`)
-        - `convex/bookingsWaitlist.ts` (`offerSpotToWaitlist`)
-        - `domain/src/bookingRules.ts]` (`selectNextWaitlisted`)
-    3. `ts_header([files...])`: Fetched line-numbered signatures for all exported functions before viewing source lines.
-    4. `view_file`: Targeted exact line numbers (e.g. lines `138–172` in `bookingsCheckIn.ts`
-    * *Advantage*: High signal-to-noise ratio, zero wasted lines, clean mental model of function contracts upfront.
-
-#### 2. Output Accuracy & Completeness
-* **Session 1 Explanation**: Accurately described queue entry `convex/domain/src/bookingRules.ts#L25`, `offerSpotToWaitlist`, `acceptOffer`, `declineOffer`, and `expireOffer`. However, it missed how admin check-in releases (`releaseSpotToWaitlist` in `convex/convex/bookingsCheckIn.ts#L138) and reallocation hooks (`reallocation.ts` in `convex/convex/reallocation.ts#L38`) trigger the queue offering flow.
-* **Session 2 Explanation**: Produced a more thorough explanation because `ts_header` captured all entry points into the waitlist system across the entire monorepo, explicitly highlighting:
-    - Admin no-show spot releases (`releaseSpotToWaitlist` in `convex/convex/bookingsCheckIn.ts#L138`).
-    - Automated waitlist offer notifications (`sendWaitlistOfferNotification` in `convex/convex/bookingsNotifications.ts#L6`).
-    - Integration with spot reallocation optimization (`optimizeSchedule` in `convex/convex/reallocation.ts#L12)).
-
----
-
-### Final Evaluation
-
-**Session 2 (using `ts_header` tool) was significantly superior in execution quality:**
-1. **Efficiency**: Session 2 used top-down index-driven discovery instead of trial-and-error text grepping.
-2. **Comprehensive Synthesis**: Session 2 discovered and incorporated entry points (notifications, check-in releases) that Session 1 overlooked.
+The session with `ts_header` was more efficient (index-driven discovery instead of trial-and-error grepping) and more complete (it found entry points the other session overlooked). The full session-by-session breakdown is in [docs/case-study.md](docs/case-study.md).
 
 ## Install
 
-Requires Node 20+.
+Requires Node 20+ and [pnpm](https://pnpm.io).
 
 ```bash
 git clone https://github.com/<your-username>/ts-header-mcp.git ~/tools/ts-header
 cd ~/tools/ts-header
-npm install
-npm test                     # quiet unit suite (extractor, formatter, router)
-npm run smoke-test           # verbose: prints full example headers for eyeballing
-npm run build                # -> dist/server.js and dist/cli.js
+pnpm install
+pnpm test                    # quiet unit suite (extractor, formatter, router)
+pnpm run smoke-test          # verbose: prints full example headers for eyeballing
+pnpm run build               # -> dist/server.js and dist/cli.js
 ```
 
 Cloning outside your working repositories (e.g. `~/tools`) keeps the server out of your projects' version control.
 
-Note for TypeScript 6.0+: the compiler no longer auto-includes packages from `node_modules/@types`, so the project tsconfig sets `"types": ["node"]` explicitly. If you see `TS2591: Cannot find name 'process'` during `npm run build`, that line is missing.
+Note for TypeScript 6.0+: the compiler no longer auto-includes packages from `node_modules/@types`, so the project tsconfig sets `"types": ["node"]` explicitly. If you see `TS2591: Cannot find name 'process'` during `pnpm run build`, that line is missing.
 
 ## CLI Usage
 
@@ -213,6 +172,7 @@ WORKSPACE IT WILL SERVE: <PATH_TO_MY_TS_PROJECT>
 1. PRE-FLIGHT CHECK:
    Run `node -v` to ensure my environment has Node.js version 20 or higher.
    If the version is lower, stop immediately and explain that Node 20+ is required.
+   Also confirm pnpm is available (`pnpm -v`); if not, run `corepack enable`.
 
 2. INSTALL LOCATION: outside any git repo I work in:
    git clone the SOURCE into ~/tools/ts-header. Never copy it into my current
@@ -220,9 +180,9 @@ WORKSPACE IT WILL SERVE: <PATH_TO_MY_TS_PROJECT>
 
 3. BUILD AND TEST:
    cd ~/tools/ts-header
-   npm install
-   npm test                      # unit suite: must end with "fail 0"
-   npm run build                 # produces dist/server.js
+   pnpm install
+   pnpm test                     # unit suite: must end with "fail 0"
+   pnpm run build                # produces dist/server.js
    If a test fails, stop and show me the full output. Do not modify the source
    to make tests pass without telling me what you changed and why.
 
@@ -266,28 +226,23 @@ test results, and the three smoke-test outputs.
 
 </details>
 
-### Mirica
+### Other clients (HTTP bridge)
 
-Mirica's custom MCP tools are sandboxed JavaScript files (fetch-only, no process spawning), so they cannot launch a stdio server. Instead, a small HTTP bridge (`http-server.mjs`, in this repo) wraps the same router and serves plain JSON on `127.0.0.1:7461`, and a Mirica tool file calls it via `fetch()`.
+For clients that cannot launch a stdio server, `http-server.mjs` wraps the same router and serves plain JSON over local HTTP. One example integration lives in [`mirica-tool/`](mirica-tool/README.md).
 
-```bash
-# 1. Build, then start the bridge (detached; survives closing the terminal)
-npm run build
-nohup node /path/to/ts-header/http-server.mjs >/tmp/ts-header-http.log 2>&1 &
+## Teach your agent to use it
 
-# 2. Install the tool file
-cp mirica-tool/ts_header.js \
-  ~/Library/Application\ Support/ArtificialNecessity/MiricaLLMData/custom-mcp-tools/
-#  (Windows: %LOCALAPPDATA%\ArtificialNecessity\MiricaLLMData\custom-mcp-tools\)
+Registering the server is only half the setup. Without an explicit instruction, agents tend to fall back to reading whole files for orientation. Add a rule to your project's agent instructions file (`AGENTS.md`, `.cursorrules`, `CLAUDE.md`, or the equivalent):
+
+```markdown
+# TypeScript Project Analysis
+
+- When analyzing TypeScript projects, always call the `ts_header` tool first to
+  get file and directory structures instead of reading entire source files.
+- Open source files only at the specific line numbers `ts_header` reports.
 ```
 
-Then click **Reload Tools** in Mirica's Settings → MCP Tools. The tool appears as `ts_header__view` and takes an extra `workspace` argument (absolute path to the project to serve), since one bridge serves any number of workspaces.
-
-The bridge does not persist across reboots. To restart it, rerun the `nohup` line above ...or just ask a Mirica agent to start it; the tool's error message on a failed connection includes the exact command. Check whether it is running with `curl -s http://127.0.0.1:7461/health`.
-
-If you change the bridge or the tool: restart the bridge (kill the `node .../http-server.mjs` process and rerun it) after rebuilding, and re-copy `mirica-tool/ts_header.js` + Reload Tools after editing the tool file.
-
-Whichever client you use, an instruction like step 6 above (in project rules, `.cursorrules`, or the equivalent) makes a real difference: without it, agents tend to fall back to reading whole files.
+In field testing this single rule was the difference between agents using the tool consistently and ignoring it.
 
 ## Files, caching, and sandboxes
 
@@ -328,8 +283,8 @@ Deliberately out of scope: editing/refactoring (read-only tool), full-text searc
 
 ## Status and tests
 
-- `npm test` runs the unit suite (`test/unit/`, Node's built-in test runner via tsx, 66 tests): formatter tests are pure-function tests over hand-built models (annotations, docs modes, dense-block grouping, error banners, truncation, TOC layout); extractor tests build one program over the shared fixture and assert on the model structure (depth semantics, inferred return types, overloads, JSDoc extraction, diagnostic attachment, barrel detection); router tests build a throwaway workspace in the OS temp dir and cover all three navigation levels, the `filter` parameter, `.gitignore` handling, guard rails, and the zero-writes invariant (including with an `incremental: true` tsconfig). A Convex-shaped fixture guards the framework-code regressions found in field testing: large `export const x = framework({...})` declarations keep their own line annotations, and rendered types are length-capped with `import("...")` qualifiers stripped.
-- `npm run smoke-test` is intentionally verbose: it prints complete rendered headers for the fixture at two depth/docs combinations, for human review of the output format, followed by a summary set of assertions.
+- `pnpm test` runs the unit suite (`test/unit/`, Node's built-in test runner via tsx, 66 tests): formatter tests are pure-function tests over hand-built models (annotations, docs modes, dense-block grouping, error banners, truncation, TOC layout); extractor tests build one program over the shared fixture and assert on the model structure (depth semantics, inferred return types, overloads, JSDoc extraction, diagnostic attachment, barrel detection); router tests build a throwaway workspace in the OS temp dir and cover all three navigation levels, the `filter` parameter, `.gitignore` handling, guard rails, and the zero-writes invariant (including with an `incremental: true` tsconfig). A Convex-shaped fixture guards the framework-code regressions found in field testing: large `export const x = framework({...})` declarations keep their own line annotations, and rendered types are length-capped with `import("...")` qualifiers stripped.
+- `pnpm run smoke-test` is intentionally verbose: it prints complete rendered headers for the fixture at two depth/docs combinations, for human review of the output format, followed by a summary set of assertions.
 - `server.ts` targets `@modelcontextprotocol/sdk` ^1.x. It was written in an environment without registry access, so the SDK wiring is the one part not exercised by the test suite; everything beneath it is executed and type-checked under `--strict`.
 
-Known limitations, planned as follow-ups: cache invalidation is per-request mtime checking rather than a file watcher (correct, but more stat calls than necessary on large projects); project references are handled by folding referenced sources into one program, which is accurate but can make programs large in big monorepos (a solution-builder approach would fix this); and the design doc describes an evaluation comparing an agent's wrong-file reads with and without the tool, which has not been run yet.
+Known limitations are tracked as backlog items 2 and 3 above. Separately, the design doc describes a systematic evaluation of an agent's wrong-file reads with and without the tool; the informal comparison in [docs/case-study.md](docs/case-study.md) exists, but that evaluation has not been run yet.
