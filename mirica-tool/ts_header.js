@@ -1,6 +1,6 @@
 // Mirica custom MCP tool: ts-header
 // Bridges to the local ts-header HTTP server (http-server.mjs in the ts-header repo).
-// Start the bridge with:  node /Users/tomn/src/ts-header/http-server.mjs   (port 7461)
+// Start the bridge with:  node /Users/tomn/src/ts-header-mcp/http-server.mjs   (port 7461)
 
 const TS_HEADER_URL = "http://127.0.0.1:7461/ts-header";
 
@@ -37,7 +37,7 @@ const MCP_TOOLS = {
 
 const MCP_TOOL_INSTRUCTIONS = `
 ts_header__view requires a local bridge process:
-    node /Users/tomn/src/ts-header/http-server.mjs
+    node /Users/tomn/src/ts-header-mcp/http-server.mjs
 If a call fails with a connection error, ask the user to start the bridge (or start it yourself via execute_command, backgrounded), then retry.
 
 Usage pattern (ls/cat model):
@@ -77,7 +77,7 @@ function view(params) {
         });
     } catch (e) {
         return "ERROR: could not reach ts-header bridge at " + TS_HEADER_URL +
-            " (" + e + "). Start it with: node /Users/tomn/src/ts-header/http-server.mjs";
+            " (" + e + "). Start it with: node /Users/tomn/src/ts-header-mcp/http-server.mjs";
     }
     if (!resp.ok) {
         return "ERROR: bridge returned HTTP " + resp.status + ": " + resp.text();

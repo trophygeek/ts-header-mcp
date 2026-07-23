@@ -9,7 +9,7 @@ Mirica's custom MCP tools are sandboxed JavaScript files (fetch-only, no process
 ```bash
 # 1. Build, then start the bridge (detached; survives closing the terminal)
 pnpm run build
-nohup node /path/to/ts-header/http-server.mjs >/tmp/ts-header-http.log 2>&1 &
+nohup node /path/to/ts-header-mcp/http-server.mjs >/tmp/ts-header-http.log 2>&1 &
 
 # 2. Install the tool file
 cp mirica-tool/ts_header.js \
