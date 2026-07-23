@@ -42,12 +42,12 @@ What ts-header does that the above do not, in combination:
 
 One tool, `ts_header(path, depth?, docs?, max_tokens?, filter?)`. Navigation depth is expressed by the path, so the interaction model is the familiar `ls` / `cat` pattern rather than a set of tools to choose between.
 
-- `path` — file or directory, relative to the workspace. A directory of directories returns a project overview; a directory of files returns a per-file export list (with barrel-file detection and `[test]` tagging); a file returns the full header. `"."` gives the project overview. Also accepts an array of file paths or a glob pattern (`"src/**/*.ts"`) for batch multi-file headers in one call, capped at 20 files; the token budget is split across the batch, and per-item problems (missing file, directory, non-TS) are reported inline without failing the rest.
-- `depth` — `exports` (default) | `all` (adds non-exported declarations and private members) | `deep` (also descends into function bodies: inner functions, closures, locally declared classes).
-- `docs` — `none` | `brief` (default: first JSDoc sentence; shown after single-line signatures, before multi-line declarations) | `full` (complete JSDoc including `@param` and `@throws`). `@deprecated` is always shown regardless of mode. A JSDoc block at the very top of a file is treated as the file's description rather than the first declaration's: it renders under the header banner and as a short annotation on the file's row in directory listings.
-- `max_tokens` — approximate output budget, default 4000. Truncated output says so and how to request more.
-- `filter` — show only symbols whose name matches a pattern (case-insensitive regex; plain text works too). Applies at every level, so `ts_header(".", {filter: "booking"})` acts as a lightweight typed symbol search across the project. Filters names only; full-text search inside function bodies remains grep's job.
-- `includeImports` — when true, the header opens with a `// -- imports --` block listing the file's import statements, collapsed to one line each and elided to 120 characters. Off by default (imports rarely earn their tokens for orientation).
+- `path`: file or directory, relative to the workspace. A directory of directories returns a project overview; a directory of files returns a per-file export list (with barrel-file detection and `[test]` tagging); a file returns the full header. `"."` gives the project overview. Also accepts an array of file paths or a glob pattern (`"src/**/*.ts"`) for batch multi-file headers in one call, capped at 20 files; the token budget is split across the batch, and per-item problems (missing file, directory, non-TS) are reported inline without failing the rest.
+- `depth`: `exports` (default) | `all` (adds non-exported declarations and private members) | `deep` (also descends into function bodies: inner functions, closures, locally declared classes).
+- `docs`:  `none` | `brief` (default: first JSDoc sentence; shown after single-line signatures, before multi-line declarations) | `full` (complete JSDoc including `@param` and `@throws`). `@deprecated` is always shown regardless of mode. A JSDoc block at the very top of a file is treated as the file's description rather than the first declaration's: it renders under the header banner and as a short annotation on the file's row in directory listings.
+- `max_tokens`: approximate output budget, default 4000. Truncated output says so and how to request more.
+- `filter`: show only symbols whose name matches a pattern (case-insensitive regex; plain text works too). Applies at every level, so `ts_header(".", {filter: "booking"})` acts as a lightweight typed symbol search across the project. Filters names only; full-text search inside function bodies remains grep's job.
+- `includeImports`: when true, the header opens with a `// -- imports --` block listing the file's import statements, collapsed to one line each and elided to 120 characters. Off by default (imports rarely earn their tokens for orientation).
 
 For framework-wrapper declarations like Convex's `export const f = mutation({ args: {...}, handler: ... })`, the header adds a `// args:` line under the signature showing the validator shape as written (or the handler's parameter list when there is no `args` property). The line is suppressed when it would only restate the property names already visible in the checked signature; when too long, whole properties are elided with `…n more` rather than cut mid-identifier.
 
@@ -92,10 +92,10 @@ ts-header-cli <workspaceRoot> <path> [options]
 ```
 
 ### Options
-* `--depth=exports|all|deep` — Level of declaration detail to extract.
-* `--docs=none|brief|full` — JSDoc detail level.
-* `--max-tokens=N` — Approximate token budget limit.
-* `--filter=PATTERN` — RegEx pattern to filter symbols by name.
+* `--depth=exports|all|deep`: Level of declaration detail to extract.
+* `--docs=none|brief|full`: JSDoc detail level.
+* `--max-tokens=N`: Approximate token budget limit.
+* `--filter=PATTERN`: RegEx pattern to filter symbols by name.
 
 The output is written to `stdout`, and any errors to `stderr` (exits with code `0` on success, `1` on error).
 
@@ -158,21 +158,21 @@ WORKSPACE IT WILL SERVE: <PATH_TO_MY_TS_PROJECT>
    Run `node -v` to ensure my environment has Node.js version 20 or higher.
    If the version is lower, stop immediately and explain that Node 20+ is required.
 
-2. INSTALL LOCATION — outside any git repo I work in:
+2. INSTALL LOCATION: outside any git repo I work in:
    git clone the SOURCE into ~/tools/ts-header. Never copy it into my current
    workspace; nothing from this setup may be committed to any of my repositories.
 
 3. BUILD AND TEST:
    cd ~/tools/ts-header
    npm install
-   npm test                      # unit suite — must end with "fail 0"
+   npm test                      # unit suite: must end with "fail 0"
    npm run build                 # produces dist/server.js
    If a test fails, stop and show me the full output. Do not modify the source
    to make tests pass without telling me what you changed and why.
 
 4. REGISTER THE SERVER:
    Find my MCP config: ~/.gemini/config/mcp_config.json on current Antigravity
-   versions (older installs used ~/.gemini/antigravity/mcp_config.json — use
+   versions (older installs used ~/.gemini/antigravity/mcp_config.json ...use
    whichever exists; if both exist, use the one the IDE opens via the agent
    panel "…" menu > MCP Servers > Manage MCP Servers > View raw config).
    MERGE the following entry into the existing "mcpServers" object. Do NOT
@@ -227,7 +227,7 @@ cp mirica-tool/ts_header.js \
 
 Then click **Reload Tools** in Mirica's Settings → MCP Tools. The tool appears as `ts_header__view` and takes an extra `workspace` argument (absolute path to the project to serve), since one bridge serves any number of workspaces.
 
-The bridge does not persist across reboots. To restart it, rerun the `nohup` line above — or just ask a Mirica agent to start it; the tool's error message on a failed connection includes the exact command. Check whether it is running with `curl -s http://127.0.0.1:7461/health`.
+The bridge does not persist across reboots. To restart it, rerun the `nohup` line above ...or just ask a Mirica agent to start it; the tool's error message on a failed connection includes the exact command. Check whether it is running with `curl -s http://127.0.0.1:7461/health`.
 
 If you change the bridge or the tool: restart the bridge (kill the `node .../http-server.mjs` process and rerun it) after rebuilding, and re-copy `mirica-tool/ts_header.js` + Reload Tools after editing the tool file.
 
@@ -243,10 +243,10 @@ Directory listings respect the workspace-root `.gitignore` (a common subset: `*`
 
 Other environment variables:
 
-- `TS_HEADER_GITIGNORE=0` — disable .gitignore handling in listings
-- `TS_HEADER_DOCS=none|brief|full` — server-wide default for the `docs` option, useful for testing whether doc summaries earn their tokens for your agents
-- `TS_HEADER_DENSE_MIN` — grouping threshold for dense declaration blocks, default 6 source lines
-- `TS_HEADER_MAX_PROJECTS` — LanguageService LRU size for monorepos, default 4
+- `TS_HEADER_GITIGNORE=0`: disable .gitignore handling in listings
+- `TS_HEADER_DOCS=none|brief|full`: server-wide default for the `docs` option, useful for testing whether doc summaries earn their tokens for your agents
+- `TS_HEADER_DENSE_MIN`: grouping threshold for dense declaration blocks, default 6 source lines
+- `TS_HEADER_MAX_PROJECTS`: LanguageService LRU size for monorepos, default 4
 
 ## Architecture
 
@@ -258,16 +258,15 @@ The extractor sits behind the `FileHeaderModel` contract, so it can be replaced 
 
 Roughly in priority order. The first two come from the original design doc (see `ts-header-design.md` §12); the rest accumulated during field testing on a real monorepo.
 
-1. **Weak-model navigation eval (design-doc milestone M4).** The motivating claim — that headers reduce wrong-file reads for less capable agents — has not been measured. Plan: run a small model on navigation tasks in a mid-size repo with and without the tool, counting files read and wrong-file reads. This is the experiment that should decide the remaining format questions (e.g. whether `docs:"brief"` earns its tokens) instead of taste.
-2. **Budget-driven tree depth.** The project overview currently shows one directory level. Better: expand subdirectories while the token budget allows, collapsing the largest subtrees first, so depth falls out of `max_tokens` rather than a fixed constant.
-3. **Solution-builder project references.** Monorepo references are handled by folding referenced projects' source files into one program — correct, but programs get large in big workspaces. Using the compiler's solution-builder machinery would keep per-package programs separate.
-4. **File-watcher invalidation.** Freshness is currently per-request mtime checking (correct, but more `stat` calls than necessary on large projects). An `fs.watch`-based invalidator would make repeated directory listings cheaper.
-5. **Multi-workspace serving.** The server serves the single workspace given at startup; one config entry per project is the workaround. Resolving the workspace per-call (from the request path or client `cwd`) would let one registration serve everything.
-6. **`docs:"auto"`.** Include the brief doc sentence only when it adds information beyond the symbol name (skip "Fetches a user" on `fetchUser`). Needs a heuristic that fails gracefully; blocked on the eval above to know whether it matters.
-7. **Machine-readable output.** An optional JSON variant of `FileHeaderModel` for orchestrators that want to post-process rather than read. The model is already plain JSON internally; this is mostly a `format` parameter.
-8. **Nested `.gitignore` files.** Only the workspace-root `.gitignore` is read today; per-directory ignore files are a straightforward extension of `src/ignore.ts`.
-9. **Vue/Svelte SFC script blocks.** Extract from `<script lang="ts">` sections. Low priority unless a target codebase needs it.
-10. **Overload polish.** Overload chains render tightly, but the implementation signature (not callable in TS) still appears alongside the declaration overloads; `.d.ts` convention would hide it while keeping its L-range on the chain.
+1. **Budget-driven tree depth.** The project overview currently shows one directory level. Better: expand subdirectories while the token budget allows, collapsing the largest subtrees first, so depth falls out of `max_tokens` rather than a fixed constant.
+2. **Solution-builder project references.** Monorepo references are handled by folding referenced projects' source files into one program — correct, but programs get large in big workspaces. Using the compiler's solution-builder machinery would keep per-package programs separate.
+3. **File-watcher invalidation.** Freshness is currently per-request mtime checking (correct, but more `stat` calls than necessary on large projects). An `fs.watch`-based invalidator would make repeated directory listings cheaper.
+4. **Multi-workspace serving.** The server serves the single workspace given at startup; one config entry per project is the workaround. Resolving the workspace per-call (from the request path or client `cwd`) would let one registration serve everything.
+5. **`docs:"auto"`.** Include the brief doc sentence only when it adds information beyond the symbol name (skip "Fetches a user" on `fetchUser`). Needs a heuristic that fails gracefully; blocked on the eval above to know whether it matters.
+6. **Machine-readable output.** An optional JSON variant of `FileHeaderModel` for orchestrators that want to post-process rather than read. The model is already plain JSON internally; this is mostly a `format` parameter.
+7. **Nested `.gitignore` files.** Only the workspace-root `.gitignore` is read today; per-directory ignore files are a straightforward extension of `src/ignore.ts`.
+8. **Vue/Svelte SFC script blocks.** Extract from `<script lang="ts">` sections. Low priority unless a target codebase needs it.
+9. **Overload polish.** Overload chains render tightly, but the implementation signature (not callable in TS) still appears alongside the declaration overloads; `.d.ts` convention would hide it while keeping its L-range on the chain.
 
 Deliberately out of scope: editing/refactoring (read-only tool), full-text search inside function bodies (grep does this better), and importance ranking (headers are complete by design; ranked summaries are Aider-repo-map territory).
 
