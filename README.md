@@ -17,9 +17,12 @@ export type UserId = Brand<string, "UserId">;
 export interface User { id: UserId; name: string; email: string; roles: Role[]; }
 
 export function createUserService(cfg: Config): UserService     // L245
+
+export function processOrder(o: Ordr): number                   // L319-321 ⚠ TS2304: Cannot find name 'Ordr'. — type unreliable
+
 ```
 
-The idea is the same as a C header: an agent reads the compact view first, then opens the source only at the line numbers it needs. Return types come from the TypeScript type checker, so inferred returns are shown explicitly. Files with type or syntax errors still produce a header; unreliable signatures are marked individually (`// L84 ⚠ TS2304: Cannot find name 'Ordr'`) rather than failing the whole file.
+The idea is the same as a C header: an agent reads the compact view first, then opens the source only at the line numbers it needs. Return types come from the TypeScript type checker, so inferred returns are shown explicitly. Files with type or syntax errors still produce a header; unreliable signatures are marked individually (`// L319-321 ⚠ TS2304: Cannot find name 'Ordr'`) rather than failing the whole file.
 
 ## How it relates to existing tools
 
