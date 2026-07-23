@@ -38,6 +38,8 @@ What ts-header does that the above do not, in combination:
 - No files written by default, so nothing can leak into version control
 - Focused results with fewer tool calls to improve LLM attention
 
+(See comparison below.) 
+
 ## The tool
 
 One tool, `ts_header(path, depth?, docs?, max_tokens?, filter?)`. Navigation depth is expressed by the path, so the interaction model is the familiar `ls` / `cat` pattern rather than a set of tools to choose between.
@@ -61,6 +63,60 @@ For framework-wrapper declarations like Convex's `export const f = mutation({ ar
 | **One-Shot Project Navigation**| **Yes** | No (Multi-step) | **Yes** (Lossy) | No |
 | **Includes Private/Local Symbols**| **Optional** | Yes | No | No |
 
+
+## Comparison of `ts_header` tool and standard `grep` exploration
+
+Ran the exact same query `Explain how waitlist queues work in this project` over a large, complex project. One session used `ts_header` and the other did not.
+Thes test used same LLM (Google Flash 3.5) in Antigravity IDE.
+
+### Summary Comparison
+
+| Dimension | Session 1 (`NO ts_header tool`)                                                                                                                            | Session 2 (`with ts_header`)                                                                 |
+| :--- |:-----------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------|
+| **Initial Discovery Strategy** | Unfiltered `grep_search("waitlist")` (200 matches)                                                                                                         | Structured `ts_header` directory scan & filter                                               |
+| **Module Coverage** | Found 4 key files; missed `bookingsCheckIn.ts` in `convex/convex/bookingsCheckIn.ts` & `bookingsNotifications.ts` `convex/convex/bookingsNotifications.ts` | Found all 5 waitlist-related files across `convex/` and `domain/`                            |
+| **Tool Execution Efficiency** | Trial-and-error grepping + full-file viewing                                                                                                               | Hierarchical: Directory overview → Filtered signatures → Targeted line views                 |
+| **Explanation Completeness** | Solid overview of placement, offering, claiming, and expiration                                                                                            | Complete end-to-end trace including admin no-show spot releases and background notifications |
+
+---
+
+### Detailed Comparison & Evaluation
+
+#### 1. Information Discovery & Signal-to-Noise Ratio
+* **Session 1 Strategy**:
+    1. `grep_search("waitlist")` (200 matches across web app, admin app, tests, docs).
+    2. `view_file` on `bookingsWaitlist.ts` (entire 373 lines at once).
+    3. `grep_search("offerSpotToWaitlist")`.
+    4. `view_file` on `bookingRules.ts`.
+    5. `grep_search('bookingStatus: "waitlisted"')` (0 matches due to quotes formatting).
+    6. `view_file` on `bookings.ts`.
+    * *Drawback*: High noise level, unstructured exploration, and redundant view calls.
+
+* **Session 2 Strategy**:
+    1. `ts_header(".")`: Identified major modules (`apps/`, `convex/`, `domain/`, `tooling/`).
+    2. `ts_header(".", { filter: "waitlist" })`: Instantly returned the exact matching files:
+        - `convex/bookingsCheckIn.ts` (`releaseSpotToWaitlist`)
+        - `convex/bookingsNotifications.ts` (`sendWaitlistOfferNotification`)
+        - `convex/bookingsWaitlist.ts` (`offerSpotToWaitlist`)
+        - `domain/src/bookingRules.ts]` (`selectNextWaitlisted`)
+    3. `ts_header([files...])`: Fetched line-numbered signatures for all exported functions before viewing source lines.
+    4. `view_file`: Targeted exact line numbers (e.g. lines `138–172` in `bookingsCheckIn.ts`
+    * *Advantage*: High signal-to-noise ratio, zero wasted lines, clean mental model of function contracts upfront.
+
+#### 2. Output Accuracy & Completeness
+* **Session 1 Explanation**: Accurately described queue entry `convex/domain/src/bookingRules.ts#L25`, `offerSpotToWaitlist`, `acceptOffer`, `declineOffer`, and `expireOffer`. However, it missed how admin check-in releases (`releaseSpotToWaitlist` in `convex/convex/bookingsCheckIn.ts#L138) and reallocation hooks (`reallocation.ts` in `convex/convex/reallocation.ts#L38`) trigger the queue offering flow.
+* **Session 2 Explanation**: Produced a more thorough explanation because `ts_header` captured all entry points into the waitlist system across the entire monorepo, explicitly highlighting:
+    - Admin no-show spot releases (`releaseSpotToWaitlist` in `convex/convex/bookingsCheckIn.ts#L138`).
+    - Automated waitlist offer notifications (`sendWaitlistOfferNotification` in `convex/convex/bookingsNotifications.ts#L6`).
+    - Integration with spot reallocation optimization (`optimizeSchedule` in `convex/convex/reallocation.ts#L12)).
+
+---
+
+### Final Evaluation
+
+**Session 2 (using `ts_header` tool) was significantly superior in execution quality:**
+1. **Efficiency**: Session 2 used top-down index-driven discovery instead of trial-and-error text grepping.
+2. **Comprehensive Synthesis**: Session 2 discovered and incorporated entry points (notifications, check-in releases) that Session 1 overlooked.
 
 ## Install
 
