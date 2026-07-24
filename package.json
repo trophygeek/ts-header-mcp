@@ -4,6 +4,7 @@
   "description": "MCP server producing C-header-style signature views of TypeScript source, with line offsets, for AI coding agents",
   "type": "module",
   "license": "MIT",
+  "packageManager": "pnpm@11.10.0",
   "bin": {
     "ts-header-mcp": "dist/server.js",
     "ts-header-cli": "dist/cli.js"
