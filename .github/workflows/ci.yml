@@ -33,3 +33,12 @@ jobs:
 
       - name: Validate
         run: pnpm validate
+
+      - name: Smoke test
+        run: pnpm run smoke-test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run built CLI against this repo
+        run: node dist/cli.js . src/router.ts
