@@ -82,7 +82,7 @@ The session with `ts_header` was more efficient (index-driven discovery instead 
 
 ## Install
 
-Requires Node 20+ and [pnpm](https://pnpm.io).
+Requires Node 22+ and [pnpm](https://pnpm.io).
 
 ```bash
 git clone https://github.com/trophygeek/ts-header-mcp.git ~/tools/ts-header-mcp
@@ -173,8 +173,8 @@ SOURCE: https://github.com/trophygeek/ts-header-mcp.git
 WORKSPACE IT WILL SERVE: <PATH_TO_MY_TS_PROJECT>
 
 1. PRE-FLIGHT CHECK:
-   Run `node -v` to ensure my environment has Node.js version 20 or higher.
-   If the version is lower, stop immediately and explain that Node 20+ is required.
+   Run `node -v` to ensure my environment has Node.js version 22 or higher.
+   If the version is lower, stop immediately and explain that Node 22+ is required.
    Also confirm pnpm is available (`pnpm -v`); if not, run `corepack enable`.
 
 2. INSTALL LOCATION: outside any git repo I work in:
