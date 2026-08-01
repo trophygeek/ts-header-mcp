@@ -54,6 +54,8 @@ One tool, `ts_header(path, depth?, docs?, max_tokens?, filter?)`. Navigation dep
 - `filter`: show only symbols whose name matches a pattern (case-insensitive regex; plain text works too). Applies at every level, so `ts_header(".", {filter: "booking"})` acts as a lightweight typed symbol search across the project. Filters names only; full-text search inside function bodies remains grep's job.
 - `includeImports`: when true, the header opens with a `// -- imports --` block listing the file's import statements, collapsed to one line each and elided to 120 characters. Off by default (imports rarely earn their tokens for orientation).
 
+Line numbers point at the declaration itself; any JSDoc block sits immediately above it. When reading source at a reported line, include a few lines of upward context — or use `docs: "full"` to get the complete JSDoc in the header without opening the file at all.
+
 For framework-wrapper declarations like Convex's `export const f = mutation({ args: {...}, handler: ... })`, the header adds a `// args:` line under the signature showing the validator shape as written (or the handler's parameter list when there is no `args` property). The line is suppressed when it would only restate the property names already visible in the checked signature; when too long, whole properties are elided with `…n more` rather than cut mid-identifier.
 
 ### Visual Comparison: ts-header vs. Alternatives
